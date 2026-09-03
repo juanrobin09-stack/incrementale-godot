@@ -8,11 +8,10 @@ extends PixelDrawer
 ## deliberately transient/local state, never persisted, matching the
 ## original's own `runtime` object.
 ##
-## Wind-driven rain lean/speed-up is a later pass — force is hardcoded
-## to 0 for rain, which is exactly what the original's own formulas
-## reduce to when wind.force is 0 (rainAngle=0, speedMul=1). Wind
-## streaks now read the shared WindEngine directly, same as everything
-## else reacting to wind.
+## Rain leans and speeds up with the shared WindEngine, matching the
+## original's rainAngle/speedMul formulas exactly: at force 0 both
+## reduce to the straight-down, unsped-up case, so no separate "calm"
+## branch is needed anywhere below.
 
 const RAIN_COUNT := 90
 const RAIN_DEPTH_SPEED := [0.6, 1.0, 1.55]
@@ -59,6 +58,7 @@ func _build_rain() -> void:
 			"len": (3.0 + seeded(i + 3) * 3.0) * RAIN_DEPTH_LEN[depth],
 			"alpha": RAIN_DEPTH_ALPHA[depth],
 			"fallen": 0.0,
+			"drift": 0.0,
 		})
 
 func _process(delta: float) -> void:
@@ -71,8 +71,12 @@ func _process(delta: float) -> void:
 func _update_rain(delta: float) -> void:
 	if GameState.compute_stage("rain") <= 0:
 		return
+	var rain_angle: float = wind.direction * min(0.55, wind.force * 0.62)
+	var speed_mul: float = 1.0 + wind.force * 0.5
 	for p in _rain_particles:
-		p["fallen"] += p["speed"] * delta
+		var dy_step: float = p["speed"] * speed_mul * delta
+		p["fallen"] += dy_step
+		p["drift"] += dy_step * tan(rain_angle)
 
 func _update_wind_streaks(delta: float) -> void:
 	if GameState.compute_stage("wind") <= 0:
@@ -118,12 +122,17 @@ func _draw_rain() -> void:
 	var count: int = RAIN_STAGE_COUNTS[stage]
 	var base_alpha: float = 0.8
 	var rain_color: Color = Color(206.0 / 255.0, 228.0 / 255.0, 255.0 / 255.0, base_alpha)
+	var rain_angle: float = wind.direction * min(0.55, wind.force * 0.62)
+	var len_mul: float = 1.0 + wind.force * 0.3
+	var sin_a: float = sin(rain_angle)
+	var cos_a: float = cos(rain_angle)
 	for i in range(count):
 		var p: Dictionary = _rain_particles[i]
 		var y: float = fmod(p["y"] + p["fallen"], logical_h)
-		var x: float = p["x"]
+		var x: float = fmod(fmod(p["x"] + p["drift"], logical_w) + logical_w, logical_w)
+		var len_: float = p["len"] * len_mul
 		var color: Color = Color(rain_color.r, rain_color.g, rain_color.b, rain_color.a * p["alpha"])
-		draw_line(Vector2(x, y), Vector2(x, y + p["len"]), color, 1.0)
+		draw_line(Vector2(x, y), Vector2(x + sin_a * len_, y + cos_a * len_), color, 1.0)
 
 func _draw_lightning() -> void:
 	if _lightning_until <= _elapsed:
