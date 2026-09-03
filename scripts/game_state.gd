@@ -33,7 +33,10 @@ var _autosave_accumulator := 0.0
 # ---------------------------------------------------------------------------
 func _ready() -> void:
 	load_game()
-	apply_offline_progress()
+	# Deliberately NOT calling apply_offline_progress() here: this autoload's
+	# _ready() runs before the main scene exists, so nothing would be
+	# listening to offline_progress_applied yet on a cold start. The main
+	# scene calls it explicitly once it has connected the signal.
 
 func _process(delta: float) -> void:
 	var tick_step: float = GameData.TICK_MS / 1000.0
@@ -263,6 +266,42 @@ func has_lightning_boost() -> bool:
 		if GameData.UPGRADE_TREE[id].get("lightning_boost", false) and state.tree[id]["purchased"]:
 			return true
 	return false
+
+# ---------------------------------------------------------------------------
+# Village scene — visual stage per disaster (the actual drawing belongs
+# to a future render layer; this only computes which stage each disaster
+# is in, mirroring computeStage()/updateSceneCaption() from script.js)
+# ---------------------------------------------------------------------------
+func compute_stage(id: String) -> int:
+	var cfg: Dictionary = GameData.DISASTERS[id]
+	var st: Dictionary = state.disasters[id]
+	if not st["unlocked"] or st["level"] <= 0:
+		return 0
+	return min(cfg["max_visual_stage"], int(ceil(float(st["level"]) / cfg["levels_per_stage"])))
+
+func get_scene_stages() -> Dictionary:
+	return {
+		"rain": compute_stage("rain"),
+		"wind": compute_stage("wind"),
+		"storm": compute_stage("storm"),
+		"flood": compute_stage("flood"),
+	}
+
+func get_scene_caption() -> String:
+	var stages := get_scene_stages()
+	if stages["storm"] > 0:
+		return "Un orage gronde au-dessus du village !"
+	if stages["flood"] > 0:
+		return "La rivière déborde légèrement sur la berge..."
+	if stages["wind"] > 1:
+		return "Le vent forcit et agite tout le village."
+	if stages["rain"] >= 3:
+		return "Une pluie battante s'abat sur le village."
+	if stages["rain"] >= 1:
+		return "Une pluie légère tombe sur le village."
+	if stages["wind"] >= 1:
+		return "Une brise agréable souffle sur le village."
+	return "Un village paisible... pour l'instant."
 
 # ---------------------------------------------------------------------------
 # Economy — KO & the Chaos Tree
