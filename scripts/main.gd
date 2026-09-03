@@ -17,6 +17,7 @@ var _dock: DisasterDock
 var _popover: DisasterPopover
 var _reset_modal: ResetModal
 var _offline_modal: OfflineModal
+var _chaos_tree: ChaosTreeOverlay
 var _caption_label: Label
 var _open_dock_id: String = ""
 
@@ -42,6 +43,7 @@ func _ready() -> void:
 
 	_top_bar = TopBar.new()
 	_top_bar.reset_requested.connect(func(): _reset_modal.open())
+	_top_bar.open_tree_requested.connect(func(): _chaos_tree.open())
 	vbox.add_child(_top_bar)
 
 	var spacer := Control.new()
@@ -70,6 +72,9 @@ func _ready() -> void:
 
 	_offline_modal = OfflineModal.new()
 	add_child(_offline_modal)
+
+	_chaos_tree = ChaosTreeOverlay.new()
+	add_child(_chaos_tree)
 
 	GameState.offline_progress_applied.connect(_on_offline_progress)
 	GameState.apply_offline_progress()

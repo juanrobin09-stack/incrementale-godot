@@ -7,11 +7,13 @@ extends PanelContainer
 ## rendered output from this environment.
 
 signal reset_requested
+signal open_tree_requested
 
 var _label_tier: Label
 var _label_chaos: Label
 var _label_cps: Label
 var _label_ko: Label
+var _button_tree: Button
 var _button_sound: Button
 
 func _ready() -> void:
@@ -25,6 +27,10 @@ func _ready() -> void:
 	_label_chaos = _make_stat_label(row)
 	_label_cps = _make_stat_label(row)
 	_label_ko = _make_stat_label(row)
+
+	_button_tree = Button.new()
+	_button_tree.pressed.connect(func(): open_tree_requested.emit())
+	row.add_child(_button_tree)
 
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -54,6 +60,7 @@ func _refresh() -> void:
 	_label_chaos.text = "Chaos : %d" % int(floor(GameState.state.chaos))
 	_label_cps.text = "%.1f Chaos/s" % GameState.get_total_chaos_per_second()
 	_label_ko.text = "KO : %d" % GameState.get_available_ko()
+	_button_tree.text = "🌀 Arbre du Chaos"
 	_button_sound.text = "🔊" if GameState.state.settings.sound_enabled else "🔇"
 
 func _on_sound_pressed() -> void:
