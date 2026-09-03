@@ -1,6 +1,0 @@
-[gd_scene load_steps=2 format=3]
-
-[ext_resource type="Script" path="res://scripts/test_scaffold.gd" id="1_scaffold"]
-
-[node name="TestScaffold" type="Node"]
-script = ExtResource("1_scaffold")
