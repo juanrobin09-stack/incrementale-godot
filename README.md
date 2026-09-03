@@ -12,4 +12,4 @@ Reconstruction indépendante, pas un portage automatique : le rendu canvas, le H
 - [ ] HUD (scènes `Control`)
 - [ ] Rendu du village (équivalent de `render.js`)
 
-Non testé dans l'éditeur Godot à ce stade (généré sans accès à un éditeur Godot local) — à ouvrir et vérifier avant de continuer.
+Vérifié dans l'éditeur Godot 4.7 : l'autoload `GameData` se charge correctement et expose des données cohérentes à l'exécution (tiers, catastrophes, synergies, objectifs, arbre des améliorations à 21 nœuds) — validé via un smoke-test temporaire, retiré une fois la vérification faite.
