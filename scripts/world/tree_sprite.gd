@@ -12,6 +12,27 @@ extends PixelDrawer
 ## around its local origin (== the tree's ground-contact point, since
 ## `position` is set to (x, groundY) externally). _draw() only ever
 ## draws the unrotated structure; the engine rotates the result.
+##
+## Pine foliage bend fix (deviates from the original's own drawTreeStructure
+## formula, not just a straight port): the original's
+## bendAtY() clamps to a flat tipBend the moment a tier's row falls at or
+## below the trunk's own tip, but the trunk itself keeps following its
+## pow(t,1.6) curve well below that point too — it's nearly straight for
+## most of its height and only really hooks over near the very top. The
+## bottom pine tier overlaps down onto that upper-trunk region, so the
+## clamp made it shear by the FULL tip bend while the trunk right behind
+## it was barely bent — the "foliage not linked to the trunk" look.
+## _bend_at_y() now mirrors the trunk's own curve for any row still within
+## the trunk's height, so foliage overlapping the trunk always matches
+## what the trunk is doing right there. CROWN_LEAN_DAMPING then softens
+## the extra lean added above the trunk tip, so the crown settles a bit
+## toward vertical instead of amplifying the bend, like real foliage mass
+## resisting the thin branch bending under it. It's baked into
+## _bend_at_y() itself as a function of height alone (not evaluated
+## per-tier against each tier's own edges) so any two tiers sampling the
+## same y still agree — tier boundaries stay seamless too, not just the
+## trunk handoff.
+const CROWN_LEAN_DAMPING := 0.5
 
 var tree_type: String
 var width: float
@@ -148,8 +169,8 @@ func _draw_structure(origin_x: float, force: float, direction: float, t: float) 
 			var tier_h: float = height * 0.34
 			var tier_top: float = -trunk_h - height * 0.62 + i * (height * 0.26)
 			var hw: float = (width / 2.0) * (1.0 - i * 0.24)
-			var bend_at_bottom: float = _bend_at_y(tier_top + tier_h, trunk_tip_y, tree_top_y, tip_bend, apex_bend)
-			var bend_at_top: float = _bend_at_y(tier_top, trunk_tip_y, tree_top_y, tip_bend, apex_bend)
+			var bend_at_bottom: float = _bend_at_y(tier_top + tier_h, trunk_h, bend, trunk_tip_y, tree_top_y, tip_bend, apex_bend)
+			var bend_at_top: float = _bend_at_y(tier_top, trunk_h, bend, trunk_tip_y, tree_top_y, tip_bend, apex_bend)
 			px_triangle_up_sheared(origin_x, tier_top, tier_h, hw, bend_at_bottom, bend_at_top, pine_light, pine_dark)
 		for tp in tips:
 			px_circle(tp.x, tp.y, width * 0.12, pine_light, pine_dark)
@@ -163,6 +184,9 @@ func _draw_structure(origin_x: float, force: float, direction: float, t: float) 
 			var j: float = puff_flutter * force * direction * 1.2
 			px_circle(tp.x + j, tp.y + j * 0.4, width * 0.27, leaf_light, leaf_mid)
 
-func _bend_at_y(y: float, trunk_tip_y: float, tree_top_y: float, tip_bend: float, apex_bend: float) -> float:
+func _bend_at_y(y: float, trunk_h: float, bend: float, trunk_tip_y: float, tree_top_y: float, tip_bend: float, apex_bend: float) -> float:
+	if y >= trunk_tip_y:
+		var t: float = clamp(-y / trunk_h, 0.0, 1.0)
+		return bend * pow(t, 1.6)
 	var f: float = clamp((trunk_tip_y - y) / (trunk_tip_y - tree_top_y), 0.0, 1.0)
-	return tip_bend + (apex_bend - tip_bend) * f
+	return tip_bend + (apex_bend - tip_bend) * f * CROWN_LEAN_DAMPING
