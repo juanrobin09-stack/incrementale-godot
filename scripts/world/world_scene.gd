@@ -71,6 +71,20 @@ func _process(delta: float) -> void:
 		return
 	_wind.update(delta, GameState.compute_stage("wind"))
 
+## Reference art (assets/houses/) provided directly, one per roof colour
+## — see HouseSprite's own header for why the intact house is a real
+## sprite here instead of the procedural drawing every other village
+## element uses. "wall" stays in each def below only because it still
+## feeds HouseSprite's rubble-pile colours after collapse; it no longer
+## has any visual effect on the intact house itself, which is baked into
+## the sprite.
+const HOUSE_TEXTURES := {
+	"roofRed": preload("res://assets/houses/house_red.png"),
+	"roofGold": preload("res://assets/houses/house_gold.png"),
+	"roofGreen": preload("res://assets/houses/house_green.png"),
+	"roofBlue": preload("res://assets/houses/house_blue.png"),
+}
+
 func _add_houses(gx: Callable, gy: Callable, u: float) -> void:
 	var defs := [
 		{"fx": 0.05, "fy": 0.22, "scale": 1.00, "roof": "roofRed", "wall": "wallCream"},
@@ -84,7 +98,7 @@ func _add_houses(gx: Callable, gy: Callable, u: float) -> void:
 		var house := HouseSprite.new()
 		house.position = Vector2(gx.call(d["fx"]), gy.call(d["fy"]))
 		house.setup(
-			u * 0.195 * d["scale"], u * 0.135 * d["scale"], u * 0.19 * d["scale"],
+			u * 0.325 * d["scale"], HOUSE_TEXTURES[d["roof"]],
 			Palette.c(d["wall"]), Palette.c(d["wall"] + "Shadow"),
 			Palette.c(d["roof"]), Palette.c(d["roof"] + "Shadow"),
 			0.75 + _seeded(i * 9.1) * 0.6, i * 4.1 + 3.0, _wind, entities,
