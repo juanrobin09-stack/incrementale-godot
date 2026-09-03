@@ -18,8 +18,12 @@ extends Node2D
 ## shared object is safe regardless of Godot's exact _process() order
 ## between this node and its children.
 ##
-## Tree strain/fall/regrow and house/windmill stress/crack/collapse are
-## a later pass — see the individual sprite scripts.
+## Also passes `entities` (the Y-sorted container itself) to trees/
+## houses/windmill so their wind-damage state machines can spawn
+## DebrisFragment/DustPuff children into it directly — see
+## DebrisSpawner. Trees fall permanently once strain maxes out (no
+## regrow); houses/windmill likewise never rebuild once truly collapsed
+## — see each sprite's own header for the exact boundary.
 
 var entities: Node2D
 var _wind: WindEngine
@@ -75,13 +79,15 @@ func _add_houses(gx: Callable, gy: Callable, u: float) -> void:
 		{"fx": 0.605, "fy": 0.24, "scale": 1.06, "roof": "roofGold", "wall": "wallRose"},
 		{"fx": 0.775, "fy": 0.17, "scale": 0.96, "roof": "roofBlue", "wall": "wallCream"},
 	]
-	for d in defs:
+	for i in range(defs.size()):
+		var d = defs[i]
 		var house := HouseSprite.new()
 		house.position = Vector2(gx.call(d["fx"]), gy.call(d["fy"]))
 		house.setup(
 			u * 0.195 * d["scale"], u * 0.135 * d["scale"], u * 0.19 * d["scale"],
 			Palette.c(d["wall"]), Palette.c(d["wall"] + "Shadow"),
 			Palette.c(d["roof"]), Palette.c(d["roof"] + "Shadow"),
+			0.75 + _seeded(i * 9.1) * 0.6, i * 4.1 + 3.0, _wind, entities,
 		)
 		entities.add_child(house)
 
@@ -100,7 +106,7 @@ func _add_trees(gx: Callable, gy: Callable, u: float) -> void:
 		var d = defs[i]
 		var tree := TreeSprite.new()
 		tree.position = Vector2(gx.call(d["fx"]), gy.call(d["fy"]))
-		tree.setup(d["type"], d["width"], d["height"], d["flex"], i * 3.7 + 1.0, _wind)
+		tree.setup(d["type"], d["width"], d["height"], d["flex"], i * 3.7 + 1.0, _wind, entities)
 		entities.add_child(tree)
 
 func _add_decor(gx: Callable, gy: Callable, ground_h: float, u: float) -> void:
@@ -121,7 +127,7 @@ func _add_decor(gx: Callable, gy: Callable, ground_h: float, u: float) -> void:
 
 	var windmill := WindmillSprite.new()
 	windmill.position = Vector2(gx.call(0.90), gy.call(0.36))
-	windmill.setup(ground_h * 0.32)
+	windmill.setup(ground_h * 0.32, _wind, entities)
 	entities.add_child(windmill)
 
 	var bush_defs := [{"fx": 0.40, "fy": 0.35}, {"fx": 0.665, "fy": 0.37}]
@@ -138,3 +144,11 @@ func _add_decor(gx: Callable, gy: Callable, ground_h: float, u: float) -> void:
 		flower.position = Vector2(gx.call(f["fx"]), gy.call(f["fy"]))
 		flower.setup(i * 7.0)
 		entities.add_child(flower)
+
+## Same formula as PixelDrawer.seeded() — duplicated rather than shared
+## because WorldScene extends Node2D, not PixelDrawer (it does no
+## drawing of its own), and this is the one place outside a sprite that
+## needs it (per-house resilience).
+func _seeded(n: float) -> float:
+	var x: float = sin(n * 12.9898) * 43758.5453
+	return x - floor(x)

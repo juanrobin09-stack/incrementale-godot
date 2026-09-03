@@ -9,24 +9,33 @@ extends RefCounted
 ## calm/rise/peak/fall state machine that could get mis-sequenced.
 ## Owned by WorldScene, updated once per frame, read by every
 ## wind-reactive sprite (trees, bushes, fence, clouds, wind streaks).
+##
+## Also carries `elapsed` (one shared session clock, so every
+## wind-reactive sprite animates off the same timeline) and
+## `last_tree_fall_at` — the original staggers tree falls with a single
+## shared cooldown (`let lastTreeFallAt` at module scope) so several
+## trees under the same gust don't all come down on the same frame;
+## this is as reasonable a shared home for that as any, since it's
+## exactly the same kind of session-wide wind-runtime state.
 
 const MAX_FORCE := [0.0, 0.42, 0.8, 1.2]
 const FLOOR_FRACTION := 0.45
 
 var direction: float
 var force: float = 0.0
-var _elapsed: float = 0.0
+var elapsed: float = 0.0
+var last_tree_fall_at: float = -999.0
 
 func _init() -> void:
 	direction = 1.0 if randf() < 0.5 else -1.0
 
 func update(delta: float, wind_level: int) -> void:
-	_elapsed += delta
+	elapsed += delta
 	var max_force: float = MAX_FORCE[wind_level] if wind_level < MAX_FORCE.size() else 0.0
 	var target_force: float = 0.0
 	if wind_level > 0:
 		var floor_v: float = max_force * FLOOR_FRACTION
-		target_force = floor_v + _wind_wave(_elapsed) * (max_force - floor_v)
+		target_force = floor_v + _wind_wave(elapsed) * (max_force - floor_v)
 	# A single exponential glide toward that target — this only smooths
 	# the moment wind switches on/off or changes tier, since the target
 	# itself is already smooth and continuous.
