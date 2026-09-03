@@ -5,8 +5,10 @@ extends PixelDrawer
 ## drawHorizonHaze/drawGround/drawRoad from render.js, including the
 ## storm-driven colour shift (computeSkyStormT/computeStormShade read
 ## live from GameState's disaster stages, same formulas as the
-## original). Clouds, the storm darkening overlay, and the always-on
-## vignette are deferred — visual polish, not core weather.
+## original), and clouds (buildCloudSet()/drawClouds() — deterministic
+## seeded blob clusters, drifting with the shared WindEngine). The storm
+## darkening overlay and the always-on vignette are deferred — visual
+## polish, not core weather.
 
 var logical_w: float
 var logical_h: float
@@ -14,18 +16,71 @@ var ground_top: float
 var ground_h: float
 var road_x: float
 var road_w: float
+var wind: WindEngine
 
 var _ground_texture: Array = []
+var _cloud_defs: Array = []
 
-func setup(p_w: float, p_h: float, p_ground_top: float, p_ground_h: float, p_road_x: float, p_road_w: float) -> void:
+func setup(p_w: float, p_h: float, p_ground_top: float, p_ground_h: float, p_road_x: float, p_road_w: float, p_wind: WindEngine) -> void:
 	logical_w = p_w
 	logical_h = p_h
 	ground_top = p_ground_top
 	ground_h = p_ground_h
 	road_x = p_road_x
 	road_w = p_road_w
+	wind = p_wind
 	_build_ground_texture()
+	_build_clouds()
 	queue_redraw()
+
+func _build_clouds() -> void:
+	_cloud_defs.clear()
+	var layers := [
+		{"n": 3, "speedMul": 0.5, "scaleMul": 0.62, "alpha": 0.42, "fyLo": 0.02, "fyHi": 0.09},
+		{"n": 3, "speedMul": 0.95, "scaleMul": 0.88, "alpha": 0.72, "fyLo": 0.08, "fyHi": 0.18},
+		{"n": 2, "speedMul": 1.5, "scaleMul": 1.15, "alpha": 0.95, "fyLo": 0.14, "fyHi": 0.25},
+	]
+	var idx: int = 0
+	for li in range(layers.size()):
+		var layer = layers[li]
+		for i in range(int(layer["n"])):
+			var seed: float = idx * 13.7 + 4.0
+			var core_count: int = 5 + int(floor(seeded(seed) * 4.0))
+			var blobs: Array = []
+			for b in range(core_count):
+				var u: float = (float(b) / (core_count - 1)) - 0.5 if core_count > 1 else 0.0
+				var taper: float = 1.0 - abs(u) * 1.5
+				var jx: float = (seeded(seed + b * 2.1) - 0.5) * 0.55
+				var jy: float = (seeded(seed + b * 3.3 + 1) - 0.5) * 0.4
+				blobs.append({
+					"dx": u * 3.6 + jx,
+					"dy": -max(0.0, taper) * 0.55 + jy,
+					"r": max(0.32, taper * 0.85 + 0.3) * (0.8 + seeded(seed + b * 1.7 + 2) * 0.45),
+					"dark": seeded(seed + b * 5.1 + 3) > 0.6,
+					"wisp": false,
+				})
+			var wisp_count: int = 2 + int(floor(seeded(seed + 20) * 2.0))
+			for w2 in range(wisp_count):
+				var side: float = 1.0 if seeded(seed + 30 + w2) > 0.5 else -1.0
+				blobs.append({
+					"dx": side * (1.9 + seeded(seed + 31 + w2) * 1.3),
+					"dy": (seeded(seed + 32 + w2) - 0.5) * 0.7,
+					"r": 0.22 + seeded(seed + 33 + w2) * 0.28,
+					"dark": false,
+					"wisp": true,
+				})
+			_cloud_defs.append({
+				"layer": li, "speedMul": layer["speedMul"], "scaleMul": layer["scaleMul"], "baseAlpha": layer["alpha"],
+				"fx0": seeded(seed + 9), "fy": float(layer["fyLo"]) + seeded(seed + 10) * (float(layer["fyHi"]) - float(layer["fyLo"])),
+				"blobs": blobs, "traveled": 0.0,
+			})
+			idx += 1
+
+func _update_clouds(delta: float) -> void:
+	var wind_speed_mul: float = 1.0 + wind.force * 1.8
+	for c in _cloud_defs:
+		var speed: float = (3.0 + c["layer"] * 1.3) * c["speedMul"]
+		c["traveled"] += speed * wind_speed_mul * delta
 
 func _build_ground_texture() -> void:
 	_ground_texture.clear()
@@ -37,7 +92,8 @@ func _build_ground_texture() -> void:
 			"dark": seeded(i * 2.3) > 0.5,
 		})
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	_update_clouds(delta)
 	queue_redraw()
 
 func _compute_sky_storm_t() -> float:
@@ -83,6 +139,31 @@ func _draw_sky(storm_t: float) -> void:
 		px_circle(sun_x, sun_y, r,
 			Color(sun_c.r, sun_c.g, sun_c.b, fade),
 			Color(sun_mid_c.r, sun_mid_c.g, sun_mid_c.b, fade))
+
+	_draw_clouds(storm_t)
+
+func _draw_clouds(storm_t: float) -> void:
+	var base: Color = Palette.c("cloudStorm") if storm_t > 0.4 else Palette.c("cloud")
+	var shadow: Color = Palette.c("cloudStormShadow") if storm_t > 0.4 else Palette.c("cloudShadow")
+	var dir: float = wind.direction
+	for c in _cloud_defs:
+		var cycle: float = logical_w + 260.0
+		var phase: float = fmod(c["fx0"] * cycle + c["traveled"], cycle)
+		var x: float = phase - 130.0 if dir > 0 else (cycle - 130.0) - phase
+		var y: float = c["fy"] * logical_h
+		var scale: float = c["scaleMul"] * logical_w * 0.05
+		for b in c["blobs"]:
+			var r: float = max(1.0, scale * b["r"])
+			# Same ctx.globalAlpha-to-per-colour-multiplication translation
+			# as the sun fade above.
+			var alpha: float = c["baseAlpha"] * (0.45 if b["wisp"] else 1.0)
+			var bx: float = x + b["dx"] * scale
+			var by: float = y + b["dy"] * scale
+			if b["dark"]:
+				var sc := Color(shadow.r, shadow.g, shadow.b, alpha)
+				px_circle(bx, by, r, sc, sc)
+			else:
+				px_circle(bx, by, r, Color(base.r, base.g, base.b, alpha), Color(shadow.r, shadow.g, shadow.b, alpha))
 
 func _draw_hills() -> void:
 	var w := logical_w

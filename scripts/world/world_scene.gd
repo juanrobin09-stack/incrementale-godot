@@ -1,19 +1,37 @@
 class_name WorldScene
 extends Node2D
-## Composes the static village: background layer + houses/trees/well/
-## fence/lamp post/windmill/bushes/flowers, positioned via the exact
-## same fractional layout as buildLayout() in render.js, so proportions
-## match regardless of screen size. `y_sort_enabled` on the entities
-## container replaces the original's manual `entities.sort(by sortY)`
-## painter's algorithm — Godot draws y-sorted children back-to-front by
-## position.y natively, and every sprite here is anchored at its own
-## ground-contact point, so sorting by position.y is exactly sorting by
-## the original's `sortY`. WeatherLayer (rain/lightning) draws after
+## Composes the village: background layer (sky/hills/ground/road,
+## storm tint, clouds) + houses/trees/well/fence/lamp post/windmill/
+## bushes/flowers, positioned via the exact same fractional layout as
+## buildLayout() in render.js, so proportions match regardless of
+## screen size. `y_sort_enabled` on the entities container replaces the
+## original's manual `entities.sort(by sortY)` painter's algorithm —
+## Godot draws y-sorted children back-to-front by position.y natively,
+## and every sprite here is anchored at its own ground-contact point,
+## so sorting by position.y is exactly sorting by the original's
+## `sortY`. WeatherLayer (rain/lightning/wind streaks) draws after
 ## entities, on top, matching the original's foreground weather pass.
-## Wind physics and damage states are a later pass — see the individual
-## sprite scripts.
+##
+## Owns the single WindEngine instance shared by every wind-reactive
+## sprite (trees, bushes, fence, clouds, wind streaks) and drives it
+## once per frame here — see WindEngine's own header for why reading a
+## shared object is safe regardless of Godot's exact _process() order
+## between this node and its children.
+##
+## Tree strain/fall/regrow and house/windmill stress/crack/collapse are
+## a later pass — see the individual sprite scripts.
 
 var entities: Node2D
+var _wind: WindEngine
+
+func _ready() -> void:
+	# Built once, here, rather than inside build(): build() re-runs on
+	# every window resize, and re-creating WindEngine there would
+	# re-randomize its direction each time — the original computes
+	# WIND_DIRECTION exactly once, at load, and resize() never touches
+	# it. _ready() fires exactly once per session (this node is created
+	# once by WorldViewportHost), matching that.
+	_wind = WindEngine.new()
 
 func build(logical_w: float, logical_h: float) -> void:
 	for child in get_children():
@@ -30,7 +48,7 @@ func build(logical_w: float, logical_h: float) -> void:
 	add_child(background)
 	var road_x: float = gx.call(0.49)
 	var road_w: float = max(10.0, u * 0.12)
-	background.setup(logical_w, logical_h, ground_top, ground_h, road_x, road_w)
+	background.setup(logical_w, logical_h, ground_top, ground_h, road_x, road_w, _wind)
 
 	entities = Node2D.new()
 	entities.y_sort_enabled = true
@@ -42,7 +60,12 @@ func build(logical_w: float, logical_h: float) -> void:
 
 	var weather := WeatherLayer.new()
 	add_child(weather)
-	weather.setup(logical_w, logical_h)
+	weather.setup(logical_w, logical_h, _wind)
+
+func _process(delta: float) -> void:
+	if _wind == null:
+		return
+	_wind.update(delta, GameState.compute_stage("wind"))
 
 func _add_houses(gx: Callable, gy: Callable, u: float) -> void:
 	var defs := [
@@ -64,19 +87,20 @@ func _add_houses(gx: Callable, gy: Callable, u: float) -> void:
 
 func _add_trees(gx: Callable, gy: Callable, u: float) -> void:
 	var defs := [
-		{"fx": 0.145, "fy": 0.14, "type": "round", "width": u * 0.11, "height": u * 0.30},
-		{"fx": 0.30, "fy": 0.06, "type": "round", "width": u * 0.09, "height": u * 0.24},
-		{"fx": 0.485, "fy": 0.18, "type": "pine", "width": u * 0.081, "height": u * 0.34},
-		{"fx": 0.545, "fy": 0.10, "type": "pine", "width": u * 0.070, "height": u * 0.28},
-		{"fx": 0.70, "fy": 0.15, "type": "round", "width": u * 0.105, "height": u * 0.28},
-		{"fx": 0.865, "fy": 0.08, "type": "round", "width": u * 0.095, "height": u * 0.25},
-		{"fx": 0.015, "fy": 0.42, "type": "round", "width": u * 0.135, "height": u * 0.35},
-		{"fx": 0.955, "fy": 0.40, "type": "pine", "width": u * 0.086, "height": u * 0.36},
+		{"fx": 0.145, "fy": 0.14, "type": "round", "width": u * 0.11, "height": u * 0.30, "flex": 1.1},
+		{"fx": 0.30, "fy": 0.06, "type": "round", "width": u * 0.09, "height": u * 0.24, "flex": 1.2},
+		{"fx": 0.485, "fy": 0.18, "type": "pine", "width": u * 0.081, "height": u * 0.34, "flex": 1.0},
+		{"fx": 0.545, "fy": 0.10, "type": "pine", "width": u * 0.070, "height": u * 0.28, "flex": 1.0},
+		{"fx": 0.70, "fy": 0.15, "type": "round", "width": u * 0.105, "height": u * 0.28, "flex": 1.0},
+		{"fx": 0.865, "fy": 0.08, "type": "round", "width": u * 0.095, "height": u * 0.25, "flex": 1.15},
+		{"fx": 0.015, "fy": 0.42, "type": "round", "width": u * 0.135, "height": u * 0.35, "flex": 0.9},
+		{"fx": 0.955, "fy": 0.40, "type": "pine", "width": u * 0.086, "height": u * 0.36, "flex": 1.0},
 	]
-	for d in defs:
+	for i in range(defs.size()):
+		var d = defs[i]
 		var tree := TreeSprite.new()
 		tree.position = Vector2(gx.call(d["fx"]), gy.call(d["fy"]))
-		tree.setup(d["type"], d["width"], d["height"])
+		tree.setup(d["type"], d["width"], d["height"], d["flex"], i * 3.7 + 1.0, _wind)
 		entities.add_child(tree)
 
 func _add_decor(gx: Callable, gy: Callable, ground_h: float, u: float) -> void:
@@ -87,7 +111,7 @@ func _add_decor(gx: Callable, gy: Callable, ground_h: float, u: float) -> void:
 
 	var fence := FenceSprite.new()
 	fence.position = Vector2(gx.call(0.02), gy.call(0.52))
-	fence.setup(u * 0.24)
+	fence.setup(u * 0.24, _wind)
 	entities.add_child(fence)
 
 	var lamp := LampPostSprite.new()
@@ -104,7 +128,7 @@ func _add_decor(gx: Callable, gy: Callable, ground_h: float, u: float) -> void:
 	for b in bush_defs:
 		var bush := BushSprite.new()
 		bush.position = Vector2(gx.call(b["fx"]), gy.call(b["fy"]))
-		bush.setup(ground_h * 0.038)
+		bush.setup(ground_h * 0.038, _wind)
 		entities.add_child(bush)
 
 	var flower_defs := [{"fx": 0.22, "fy": 0.44}, {"fx": 0.79, "fy": 0.42}]

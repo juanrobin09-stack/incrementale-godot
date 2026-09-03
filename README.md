@@ -13,9 +13,8 @@ Reconstruction indépendante, pas un portage automatique : le rendu canvas, le H
 - [x] Arbre du Chaos (`scripts/hud/chaos_tree_overlay.gd`) : disposition radiale, connecteurs, pan/zoom, inspecteur — mêmes constantes/formules que l'original. **Vérifié en jeu : fonctionne.**
 - [x] Rendu du village statique (`scripts/world/`) : ciel, collines, sol, route, 5 maisons, 8 arbres, puits, clôture, lampadaire, moulin, buissons, parterres de fleurs — porté fidèlement depuis `render.js` (mêmes couleurs, mêmes proportions, même disposition fractionnelle), rendu à basse résolution logique puis mis à l'échelle sans lissage pour garder le style pixel art. **Vérifié en jeu : fonctionne, aucune correction nécessaire.**
 - [x] Météo — pluie, éclair, teinte d'orage (`scripts/world/weather_layer.gd` + `background_layer.gd`). **Vérifié en jeu : fonctionne, aucune correction nécessaire.**
-- [ ] Moteur de vent (rafales) + balancement des arbres/buissons/clôture + traînées de vent + nuages qui dérivent — en cours
+- [~] Moteur de vent (`scripts/world/wind_engine.gd`) + balancement des arbres/buissons/clôture + traînées de vent + nuages qui dérivent. **Poussé mais pas encore vérifié.**
 - [ ] Dégâts du vent (arbres qui plient/tombent/repoussent, maisons qui se fissurent/perdent leur toit/s'effondrent, débris) et fumée des cheminées — suite séparée, mécanique plus lourde et plus incertaine que le simple balancement
 - [ ] Passe de fidélité visuelle (bois/parchemin/or, dock en pierre) — nécessitera des allers-retours avec des captures d'écran, comme pour l'Arbre du Chaos sur la version web
-- [ ] Passe de fidélité visuelle (bois/parchemin/or, dock en pierre) — nécessitera des allers-retours avec des captures d'écran, comme pour l'Arbre du Chaos sur la version web
 
-Vérifié dans l'éditeur Godot 4.7 : `GameData` expose des données cohérentes à l'exécution, `GameState` a été validé bout en bout (45 vérifications automatiques, toutes au vert), le HUD fonctionnel, l'Arbre du Chaos et le village statique ont tous été confirmés jouables/corrects à l'écran.
+Vérifié dans l'éditeur Godot 4.7 : `GameData` expose des données cohérentes à l'exécution, `GameState` a été validé bout en bout (45 vérifications automatiques, toutes au vert), le HUD fonctionnel, l'Arbre du Chaos, le village statique et la météo ont tous été confirmés jouables/corrects à l'écran.

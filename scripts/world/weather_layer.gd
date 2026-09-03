@@ -8,29 +8,45 @@ extends PixelDrawer
 ## deliberately transient/local state, never persisted, matching the
 ## original's own `runtime` object.
 ##
-## Wind-driven rain lean/speed-up and wind streaks are a later pass —
-## force is hardcoded to 0 here, which is exactly what the original's
-## own formulas reduce to when wind.force is 0 (rainAngle=0, speedMul=1).
+## Wind-driven rain lean/speed-up is a later pass — force is hardcoded
+## to 0 for rain, which is exactly what the original's own formulas
+## reduce to when wind.force is 0 (rainAngle=0, speedMul=1). Wind
+## streaks now read the shared WindEngine directly, same as everything
+## else reacting to wind.
 
 const RAIN_COUNT := 90
 const RAIN_DEPTH_SPEED := [0.6, 1.0, 1.55]
 const RAIN_DEPTH_LEN := [0.7, 1.0, 1.35]
 const RAIN_DEPTH_ALPHA := [0.4, 0.72, 1.0]
 const RAIN_STAGE_COUNTS := [0, 25, 50, 75, RAIN_COUNT]
+const STREAK_COUNT := 12
 
 var logical_w: float
 var logical_h: float
+var wind: WindEngine
 
 var _rain_particles: Array = []
+var _wind_streaks: Array = []
 var _elapsed: float = 0.0
 var _next_lightning_at: float = -1.0
 var _lightning_until: float = -1.0
 var _bolt_seed: float = 0.0
 
-func setup(p_w: float, p_h: float) -> void:
+func setup(p_w: float, p_h: float, p_wind: WindEngine) -> void:
 	logical_w = p_w
 	logical_h = p_h
+	wind = p_wind
 	_build_rain()
+	_build_wind_streaks()
+
+func _build_wind_streaks() -> void:
+	_wind_streaks.clear()
+	for i in range(STREAK_COUNT):
+		_wind_streaks.append({
+			"seed": float(i),
+			"y": seeded(i + 70) * logical_h * 0.5,
+			"traveled": 0.0,
+		})
 
 func _build_rain() -> void:
 	_rain_particles.clear()
@@ -48,6 +64,7 @@ func _build_rain() -> void:
 func _process(delta: float) -> void:
 	_elapsed += delta
 	_update_rain(delta)
+	_update_wind_streaks(delta)
 	_maybe_trigger_lightning()
 	queue_redraw()
 
@@ -56,6 +73,13 @@ func _update_rain(delta: float) -> void:
 		return
 	for p in _rain_particles:
 		p["fallen"] += p["speed"] * delta
+
+func _update_wind_streaks(delta: float) -> void:
+	if GameState.compute_stage("wind") <= 0:
+		return
+	var speed: float = 40.0 + wind.force * 220.0
+	for st in _wind_streaks:
+		st["traveled"] += speed * delta
 
 func _maybe_trigger_lightning() -> void:
 	var storm: Dictionary = GameState.state.disasters["storm"]
@@ -72,8 +96,20 @@ func _maybe_trigger_lightning() -> void:
 		_next_lightning_at = _elapsed + min_gap + randf() * range_
 
 func _draw() -> void:
+	_draw_wind_streaks()
 	_draw_rain()
 	_draw_lightning()
+
+func _draw_wind_streaks() -> void:
+	if GameState.compute_stage("wind") <= 0:
+		return
+	var dir: float = wind.direction
+	var streak_color := Color(1, 1, 1, 0.3)
+	for st in _wind_streaks:
+		var cycle_pos: float = fmod(st["traveled"] + st["seed"] * 97.0, logical_w + 60.0) - 30.0
+		var x: float = cycle_pos if dir > 0 else logical_w - cycle_pos
+		var y: float = st["y"]
+		draw_line(Vector2(x, y), Vector2(x + 16.0 * dir, y), streak_color, 1.0)
 
 func _draw_rain() -> void:
 	var stage: int = GameState.compute_stage("rain")
