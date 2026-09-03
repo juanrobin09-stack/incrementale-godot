@@ -29,6 +29,7 @@ var _label_ko_badge: Label
 var _view_x := 0.0
 var _view_y := 0.0
 var _view_scale := 0.72
+var _pending_center := false
 
 var _dragging := false
 var _drag_start_mouse := Vector2.ZERO
@@ -40,7 +41,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
 	var dim := ColorRect.new()
-	dim.color = Color(0.05, 0.05, 0.08, 0.92)
+	dim.color = Color(0.05, 0.05, 0.08, 0.99)
 	UiUtil.fill_parent(dim)
 	add_child(dim)
 
@@ -178,7 +179,12 @@ func _node_canvas_position(node_data: Dictionary) -> Vector2:
 # ---------------------------------------------------------------------------
 func open() -> void:
 	visible = true
-	_center_view()
+	# _tree_viewport.size comes from a Container's SIZE_EXPAND_FILL, which
+	# only resolves after Godot runs a layout pass — it can still read as
+	# near-zero right here, the same frame visibility flips on. Rather than
+	# guess how many frames that pass takes, keep retrying from _process()
+	# until the size looks real, then center exactly once.
+	_pending_center = true
 
 func close() -> void:
 	visible = false
@@ -197,6 +203,9 @@ func _input(event: InputEvent) -> void:
 func _process(_delta: float) -> void:
 	if not visible:
 		return
+	if _pending_center and _tree_viewport.size.x > 10.0:
+		_center_view()
+		_pending_center = false
 	_label_ko_badge.text = "%d KO" % GameState.get_available_ko()
 	_refresh_nodes()
 	if _selected_id != "":
