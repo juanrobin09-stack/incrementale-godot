@@ -13,10 +13,13 @@ config_version=5
 config/name="Incrementable"
 config/description="Version Godot du jeu incremental/idle Incrementable — reconstruction indépendante de la version vanilla JS (juanrobin09-stack/Incrementable)."
 config/features=PackedStringArray("4.3", "GL Compatibility")
+; TEMP TEST HOOK — remove before final commit.
+run/main_scene="res://scenes/test_scaffold.tscn"
 
 [autoload]
 
 GameData="*res://scripts/game_data.gd"
+GameState="*res://scripts/game_state.gd"
 
 [rendering]
 
