@@ -8,15 +8,15 @@ var _label: Label
 
 func _ready() -> void:
 	visible = false
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	UiUtil.fill_parent(self)
 
 	var dim := ColorRect.new()
 	dim.color = Color(0, 0, 0, 0.5)
-	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	UiUtil.fill_parent(dim)
 	add_child(dim)
 
 	var center := CenterContainer.new()
-	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	UiUtil.fill_parent(center)
 	add_child(center)
 
 	var panel := PanelContainer.new()

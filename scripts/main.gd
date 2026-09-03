@@ -22,15 +22,15 @@ var _caption_label: Label
 var _open_dock_id: String = ""
 
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	UiUtil.fill_parent(self)
 
 	var background := ColorRect.new()
 	background.color = Color(0.16, 0.22, 0.14)
-	background.set_anchors_preset(Control.PRESET_FULL_RECT)
+	UiUtil.fill_parent(background)
 	add_child(background)
 
 	var margin := MarginContainer.new()
-	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	UiUtil.fill_parent(margin)
 	margin.add_theme_constant_override("margin_left", 16)
 	margin.add_theme_constant_override("margin_right", 16)
 	margin.add_theme_constant_override("margin_top", 16)

@@ -36,16 +36,16 @@ var _drag_start_view := Vector2.ZERO
 
 func _ready() -> void:
 	visible = false
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	UiUtil.fill_parent(self)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
 	var dim := ColorRect.new()
 	dim.color = Color(0.05, 0.05, 0.08, 0.92)
-	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	UiUtil.fill_parent(dim)
 	add_child(dim)
 
 	var root_margin := MarginContainer.new()
-	root_margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	UiUtil.fill_parent(root_margin)
 	root_margin.add_theme_constant_override("margin_left", 16)
 	root_margin.add_theme_constant_override("margin_right", 16)
 	root_margin.add_theme_constant_override("margin_top", 16)
