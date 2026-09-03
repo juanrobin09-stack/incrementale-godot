@@ -28,6 +28,7 @@ const PAL := {
 	"roofBlue": "#3f6fa8", "roofBlueShadow": "#2a4d78",
 	"roofGreen": "#3f8f5c", "roofGreenShadow": "#2a663f",
 	"roofGold": "#d6a23a", "roofGoldShadow": "#a97a22",
+	"roofPurple": "#5b2963", "roofPurpleShadow": "#4a1d51",
 	"leafLight": "#82c968", "leafMid": "#4f9a3d", "leafDark": "#356b28",
 	"pineLight": "#4d9364", "pineDark": "#2f6b40",
 	"trunk": "#8a5a34", "trunkDark": "#5c3b20", "trunkLit": "#a97442",

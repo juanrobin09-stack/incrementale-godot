@@ -83,6 +83,7 @@ const HOUSE_TEXTURES := {
 	"roofGold": preload("res://assets/houses/house_gold.png"),
 	"roofGreen": preload("res://assets/houses/house_green.png"),
 	"roofBlue": preload("res://assets/houses/house_blue.png"),
+	"roofPurple": preload("res://assets/houses/house_purple.png"),
 }
 
 func _add_houses(gx: Callable, gy: Callable, u: float) -> void:
@@ -90,7 +91,7 @@ func _add_houses(gx: Callable, gy: Callable, u: float) -> void:
 		{"fx": 0.05, "fy": 0.22, "scale": 1.00, "roof": "roofRed", "wall": "wallCream"},
 		{"fx": 0.235, "fy": 0.16, "scale": 0.94, "roof": "roofGold", "wall": "wallSlate"},
 		{"fx": 0.335, "fy": 0.30, "scale": 0.90, "roof": "roofGreen", "wall": "wallSlate"},
-		{"fx": 0.605, "fy": 0.24, "scale": 1.06, "roof": "roofGold", "wall": "wallRose"},
+		{"fx": 0.605, "fy": 0.24, "scale": 1.06, "roof": "roofPurple", "wall": "wallRose"},
 		{"fx": 0.775, "fy": 0.17, "scale": 0.96, "roof": "roofBlue", "wall": "wallCream"},
 	]
 	for i in range(defs.size()):
