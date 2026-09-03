@@ -8,8 +8,10 @@ extends Node2D
 ## painter's algorithm — Godot draws y-sorted children back-to-front by
 ## position.y natively, and every sprite here is anchored at its own
 ## ground-contact point, so sorting by position.y is exactly sorting by
-## the original's `sortY`. Weather, wind physics, and damage states are
-## later passes — see the individual sprite scripts.
+## the original's `sortY`. WeatherLayer (rain/lightning) draws after
+## entities, on top, matching the original's foreground weather pass.
+## Wind physics and damage states are a later pass — see the individual
+## sprite scripts.
 
 var entities: Node2D
 
@@ -37,6 +39,10 @@ func build(logical_w: float, logical_h: float) -> void:
 	_add_houses(gx, gy, u)
 	_add_trees(gx, gy, u)
 	_add_decor(gx, gy, ground_h, u)
+
+	var weather := WeatherLayer.new()
+	add_child(weather)
+	weather.setup(logical_w, logical_h)
 
 func _add_houses(gx: Callable, gy: Callable, u: float) -> void:
 	var defs := [
