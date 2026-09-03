@@ -95,12 +95,9 @@ func _add_trees(gx: Callable, gy: Callable, u: float) -> void:
 	var defs := [
 		{"fx": 0.145, "fy": 0.14, "type": "round", "width": u * 0.11, "height": u * 0.30, "flex": 1.1},
 		{"fx": 0.30, "fy": 0.06, "type": "round", "width": u * 0.09, "height": u * 0.24, "flex": 1.2},
-		{"fx": 0.485, "fy": 0.18, "type": "pine", "width": u * 0.081, "height": u * 0.34, "flex": 1.0},
-		{"fx": 0.545, "fy": 0.10, "type": "pine", "width": u * 0.070, "height": u * 0.28, "flex": 1.0},
 		{"fx": 0.70, "fy": 0.15, "type": "round", "width": u * 0.105, "height": u * 0.28, "flex": 1.0},
 		{"fx": 0.865, "fy": 0.08, "type": "round", "width": u * 0.095, "height": u * 0.25, "flex": 1.15},
 		{"fx": 0.015, "fy": 0.42, "type": "round", "width": u * 0.135, "height": u * 0.35, "flex": 0.9},
-		{"fx": 0.955, "fy": 0.40, "type": "pine", "width": u * 0.086, "height": u * 0.36, "flex": 1.0},
 	]
 	for i in range(defs.size()):
 		var d = defs[i]

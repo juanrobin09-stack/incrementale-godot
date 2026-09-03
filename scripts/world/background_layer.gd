@@ -205,7 +205,7 @@ func _draw_ground(storm_shade: float) -> void:
 		px_rect(d["x"], ground_top + d["y"], 1, 1, shadow if d["dark"] else light)
 
 func _draw_road() -> void:
-	var h: float = ground_h * 0.78
+	var h: float = ground_h
 	px_rect(road_x - road_w / 2.0, ground_top, road_w, h, Palette.c("dirt"))
 	px_rect(road_x - road_w / 2.0, ground_top, 1, h, Palette.c("dirtDark"))
 	px_rect(road_x + road_w / 2.0 - 1, ground_top, 1, h, Palette.c("dirtDark"))
