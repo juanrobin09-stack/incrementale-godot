@@ -1,0 +1,110 @@
+class_name WorldScene
+extends Node2D
+## Composes the static village: background layer + houses/trees/well/
+## fence/lamp post/windmill/bushes/flowers, positioned via the exact
+## same fractional layout as buildLayout() in render.js, so proportions
+## match regardless of screen size. `y_sort_enabled` on the entities
+## container replaces the original's manual `entities.sort(by sortY)`
+## painter's algorithm — Godot draws y-sorted children back-to-front by
+## position.y natively, and every sprite here is anchored at its own
+## ground-contact point, so sorting by position.y is exactly sorting by
+## the original's `sortY`. Weather, wind physics, and damage states are
+## later passes — see the individual sprite scripts.
+
+var entities: Node2D
+
+func build(logical_w: float, logical_h: float) -> void:
+	for child in get_children():
+		child.queue_free()
+
+	var ground_top: float = logical_h * 0.34
+	var ground_h: float = logical_h - ground_top
+	var u: float = ground_h
+
+	var gx := func(f: float) -> float: return f * logical_w
+	var gy := func(f: float) -> float: return ground_top + f * ground_h
+
+	var background := BackgroundLayer.new()
+	add_child(background)
+	var road_x: float = gx.call(0.49)
+	var road_w: float = max(10.0, u * 0.12)
+	background.setup(logical_w, logical_h, ground_top, ground_h, road_x, road_w)
+
+	entities = Node2D.new()
+	entities.y_sort_enabled = true
+	add_child(entities)
+
+	_add_houses(gx, gy, u)
+	_add_trees(gx, gy, u)
+	_add_decor(gx, gy, ground_h, u)
+
+func _add_houses(gx: Callable, gy: Callable, u: float) -> void:
+	var defs := [
+		{"fx": 0.05, "fy": 0.22, "scale": 1.00, "roof": "roofRed", "wall": "wallCream"},
+		{"fx": 0.235, "fy": 0.16, "scale": 0.94, "roof": "roofGold", "wall": "wallSlate"},
+		{"fx": 0.335, "fy": 0.30, "scale": 0.90, "roof": "roofGreen", "wall": "wallSlate"},
+		{"fx": 0.605, "fy": 0.24, "scale": 1.06, "roof": "roofGold", "wall": "wallRose"},
+		{"fx": 0.775, "fy": 0.17, "scale": 0.96, "roof": "roofBlue", "wall": "wallCream"},
+	]
+	for d in defs:
+		var house := HouseSprite.new()
+		house.position = Vector2(gx.call(d["fx"]), gy.call(d["fy"]))
+		house.setup(
+			u * 0.195 * d["scale"], u * 0.135 * d["scale"], u * 0.19 * d["scale"],
+			Palette.c(d["wall"]), Palette.c(d["wall"] + "Shadow"),
+			Palette.c(d["roof"]), Palette.c(d["roof"] + "Shadow"),
+		)
+		entities.add_child(house)
+
+func _add_trees(gx: Callable, gy: Callable, u: float) -> void:
+	var defs := [
+		{"fx": 0.145, "fy": 0.14, "type": "round", "width": u * 0.11, "height": u * 0.30},
+		{"fx": 0.30, "fy": 0.06, "type": "round", "width": u * 0.09, "height": u * 0.24},
+		{"fx": 0.485, "fy": 0.18, "type": "pine", "width": u * 0.081, "height": u * 0.34},
+		{"fx": 0.545, "fy": 0.10, "type": "pine", "width": u * 0.070, "height": u * 0.28},
+		{"fx": 0.70, "fy": 0.15, "type": "round", "width": u * 0.105, "height": u * 0.28},
+		{"fx": 0.865, "fy": 0.08, "type": "round", "width": u * 0.095, "height": u * 0.25},
+		{"fx": 0.015, "fy": 0.42, "type": "round", "width": u * 0.135, "height": u * 0.35},
+		{"fx": 0.955, "fy": 0.40, "type": "pine", "width": u * 0.086, "height": u * 0.36},
+	]
+	for d in defs:
+		var tree := TreeSprite.new()
+		tree.position = Vector2(gx.call(d["fx"]), gy.call(d["fy"]))
+		tree.setup(d["type"], d["width"], d["height"])
+		entities.add_child(tree)
+
+func _add_decor(gx: Callable, gy: Callable, ground_h: float, u: float) -> void:
+	var well := WellSprite.new()
+	well.position = Vector2(gx.call(0.565), gy.call(0.30))
+	well.setup(max(4.0, u * 0.032))
+	entities.add_child(well)
+
+	var fence := FenceSprite.new()
+	fence.position = Vector2(gx.call(0.02), gy.call(0.52))
+	fence.setup(u * 0.24)
+	entities.add_child(fence)
+
+	var lamp := LampPostSprite.new()
+	lamp.position = Vector2(gx.call(0.44), gy.call(0.42))
+	lamp.setup(ground_h * 0.34)
+	entities.add_child(lamp)
+
+	var windmill := WindmillSprite.new()
+	windmill.position = Vector2(gx.call(0.90), gy.call(0.36))
+	windmill.setup(ground_h * 0.32)
+	entities.add_child(windmill)
+
+	var bush_defs := [{"fx": 0.40, "fy": 0.35}, {"fx": 0.665, "fy": 0.37}]
+	for b in bush_defs:
+		var bush := BushSprite.new()
+		bush.position = Vector2(gx.call(b["fx"]), gy.call(b["fy"]))
+		bush.setup(ground_h * 0.038)
+		entities.add_child(bush)
+
+	var flower_defs := [{"fx": 0.22, "fy": 0.44}, {"fx": 0.79, "fy": 0.42}]
+	for i in range(flower_defs.size()):
+		var f = flower_defs[i]
+		var flower := FlowerPatchSprite.new()
+		flower.position = Vector2(gx.call(f["fx"]), gy.call(f["fy"]))
+		flower.setup(i * 7.0)
+		entities.add_child(flower)

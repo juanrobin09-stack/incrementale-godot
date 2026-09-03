@@ -9,8 +9,12 @@ extends Control
 ## original's specific art style (wood/parchment/gold, stone dock) is a
 ## later, screenshot-driven pass.
 ##
-## World/village rendering (the equivalent of render.js) is not built
-## yet — the background is a plain placeholder color for now.
+## World/village rendering (the equivalent of render.js) is a static
+## first pass (scripts/world/) — sky, hills, ground, houses, trees,
+## well, fence, lamp post, windmill, bushes, flowers, all positioned
+## from the original's exact fractional layout. No weather, no wind
+## sway, no damage states yet — those come once this base is confirmed
+## to actually look like the intended village.
 
 var _top_bar: TopBar
 var _dock: DisasterDock
@@ -24,9 +28,7 @@ var _open_dock_id: String = ""
 func _ready() -> void:
 	UiUtil.fill_parent(self)
 
-	var background := ColorRect.new()
-	background.color = Color(0.16, 0.22, 0.14)
-	UiUtil.fill_parent(background)
+	var background := WorldViewportHost.new()
 	add_child(background)
 
 	var margin := MarginContainer.new()
