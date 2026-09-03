@@ -86,6 +86,21 @@ const HOUSE_TEXTURES := {
 	"roofPurple": preload("res://assets/houses/house_purple.png"),
 }
 
+## Hand-placed per source image (pixel space of the PNG itself, not
+## world units) so HouseSprite can tear real holes out of the roof as
+## wind stress rises — see its own header. roofGreen/roofPurple are
+## recolours of the red/blue source art (same geometry, different roof
+## hue), so they reuse red/blue's rectangles rather than needing their
+## own — verified against the actual PNGs, not guessed from the def
+## scale/proportions used for the procedural houses before this.
+const HOUSE_ROOF_CHUNKS := {
+	"roofRed": [Rect2i(90, 190, 100, 80), Rect2i(290, 190, 100, 70), Rect2i(130, 160, 100, 50), Rect2i(258, 320, 70, 23)],
+	"roofGreen": [Rect2i(90, 190, 100, 80), Rect2i(290, 190, 100, 70), Rect2i(130, 160, 100, 50), Rect2i(258, 320, 70, 23)],
+	"roofGold": [Rect2i(110, 250, 110, 90), Rect2i(330, 220, 100, 80), Rect2i(220, 200, 80, 50), Rect2i(300, 425, 70, 30)],
+	"roofBlue": [Rect2i(230, 50, 110, 80), Rect2i(340, 50, 100, 80), Rect2i(120, 188, 90, 34), Rect2i(260, 330, 120, 40)],
+	"roofPurple": [Rect2i(230, 50, 110, 80), Rect2i(340, 50, 100, 80), Rect2i(120, 188, 90, 34), Rect2i(260, 330, 120, 40)],
+}
+
 func _add_houses(gx: Callable, gy: Callable, u: float) -> void:
 	var defs := [
 		{"fx": 0.05, "fy": 0.22, "scale": 1.00, "roof": "roofRed", "wall": "wallCream"},
@@ -99,7 +114,7 @@ func _add_houses(gx: Callable, gy: Callable, u: float) -> void:
 		var house := HouseSprite.new()
 		house.position = Vector2(gx.call(d["fx"]), gy.call(d["fy"]))
 		house.setup(
-			u * 0.325 * d["scale"], HOUSE_TEXTURES[d["roof"]],
+			u * 0.325 * d["scale"], HOUSE_TEXTURES[d["roof"]], HOUSE_ROOF_CHUNKS[d["roof"]],
 			Palette.c(d["wall"]), Palette.c(d["wall"] + "Shadow"),
 			Palette.c(d["roof"]), Palette.c(d["roof"] + "Shadow"),
 			0.75 + _seeded(i * 9.1) * 0.6, i * 4.1 + 3.0, _wind, entities,
