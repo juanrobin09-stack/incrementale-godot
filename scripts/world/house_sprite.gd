@@ -1,44 +1,42 @@
 class_name HouseSprite
 extends PixelDrawer
-## Intact house is a real sprite (assets/houses/house_*.png, reference art
-## provided directly) instead of the procedural pxRect/pxTriangle drawing
-## every other village element uses — the reference art's rounded shingle
-## tiles, half-timbering and lived-in detail aren't realistically
-## reproducible with this renderer's flat-shaded pixel primitives, and
-## exact visual fidelity to the references was the explicit ask here.
+## Intact + damaged states are both real sprites (assets/houses/,
+## reference art provided directly) instead of the procedural
+## pxRect/pxTriangle drawing every other village element uses — the
+## reference art's rounded shingle tiles, half-timbering, cracked plaster
+## and broken shutters aren't realistically reproducible with this
+## renderer's flat-shaded pixel primitives, and exact visual fidelity to
+## the references was the explicit ask here. A first pass tried keeping
+## the intact sprite untouched and only spawning debris on top, then
+## tearing literal chunks out of it as stress rose — dropped now that a
+## proper damaged-state reference image exists: it shows cracked walls,
+## broken windows/shutters and missing roof tiles all at once, in the
+## same hand-painted style as the intact art, which no amount of
+## procedural chunk-punching was going to match.
 ##
-## Roof damage tears real chunks out of the sprite instead of just playing
-## debris on top of an untouched texture: `texture.get_image()` is copied
-## once into `_display_image`/`_display_texture` (an ImageTexture Godot
-## lets us mutate at runtime), and each roof_chunks[i] rectangle — hand-
-## placed per reference image so it only ever covers roof pixels — is
-## erased (Image.fill_rect to transparent) the moment stress crosses its
-## tear threshold, at the same time a debris burst flies off from roughly
-## that spot. Tearing is one-way: once a chunk is gone it stays gone even
-## if stress later eases off, same as a real missing roof section
-## wouldn't grow back — only the crack overlay (still just drawn on top,
-## same as before) softens back down with stress. Walls stay a drawn
-## overlay rather than punched sprite holes: cracking reads fine as lines
-## over the intact wall texture, and unlike the roof there's no obvious
-## "chunk" shape to cut free.
+## Damage is a crossfade between the two full textures — draw_texture_rect
+## twice, the damaged one on top with its own alpha ramped by crack_t —
+## rather than a hard swap, so it still reads as gradual wear and not an
+## instant change (the original's own stated design goal, still true
+## here). Each texture keeps its own aspect ratio (_w vs _w_damaged): the
+## two reference crops aren't pixel-aligned to each other, so stretching
+## both into one shared rect would visibly warp whichever one doesn't
+## match; independent aspect-correct scaling, both anchored bottom-
+## center at the same ground point, is the honest compromise without
+## hand-registering every pair of images.
 ##
-## The previous roofless_t stage (an intermediate "roof gone, attic
-## exposed" look between cracks and rubble) is still dropped — the torn
-## roof chunks are what carries that beat now — and rubble itself is
-## still the old procedural pile; reference art for actual ruin debris is
-## a later pass.
+## Debris still bursts at fixed stress thresholds, same as before — that
+## part was never about matching a specific torn spot, so it doesn't need
+## the sprite mutation the old approach used it to justify.
 ##
-## resilience / no-respawn / no-recovery-from-collapse behaviour is
-## unchanged from before — see tree_sprite.gd's own header for the
-## "no respawn" product decision this follows.
-
-## Stress level at which roof_chunks[i] tears free — index-matched, so
-## roof_chunks and this must stay the same length.
-const TEAR_THRESHOLDS := [0.50, 0.65, 0.80, 0.93]
+## Full collapse is still the old procedural rubble pile — reference art
+## for actual ruin debris is a later pass. resilience / no-respawn /
+## no-recovery-from-collapse behaviour is unchanged — see tree_sprite.gd's
+## own header for the "no respawn" product decision this follows.
 
 var h: float
 var texture: Texture2D
-var roof_chunks: Array
+var texture_damaged: Texture2D
 var wall_color: Color
 var wall_shadow_color: Color
 var roof_color: Color
@@ -48,19 +46,17 @@ var wind: WindEngine
 var entities_parent: Node2D
 
 var _w: float
+var _w_damaged: float
 var _house_seed: float
 var _stress: float = 0.0
 var _last_stress: float = 0.0
 var _collapsed: bool = false
-var _torn_count: int = 0
-var _display_image: Image
-var _display_texture: ImageTexture
 
-func setup(p_h: float, p_texture: Texture2D, p_roof_chunks: Array, p_wall: Color, p_wall_shadow: Color, p_roof: Color, p_roof_shadow: Color,
+func setup(p_h: float, p_texture: Texture2D, p_texture_damaged: Texture2D, p_wall: Color, p_wall_shadow: Color, p_roof: Color, p_roof_shadow: Color,
 		p_resilience: float, p_seed: float, p_wind: WindEngine, p_entities_parent: Node2D) -> void:
 	h = p_h
 	texture = p_texture
-	roof_chunks = p_roof_chunks
+	texture_damaged = p_texture_damaged
 	wall_color = p_wall
 	wall_shadow_color = p_wall_shadow
 	roof_color = p_roof
@@ -69,12 +65,14 @@ func setup(p_h: float, p_texture: Texture2D, p_roof_chunks: Array, p_wall: Color
 	_house_seed = p_seed
 	wind = p_wind
 	entities_parent = p_entities_parent
-	var tex_h: float = float(texture.get_height())
-	var tex_w: float = float(texture.get_width())
-	_w = h * (tex_w / tex_h if tex_h > 0.0 else 1.0)
-	_display_image = texture.get_image()
-	_display_texture = ImageTexture.create_from_image(_display_image)
+	_w = h * _aspect(texture)
+	_w_damaged = h * _aspect(texture_damaged)
 	queue_redraw()
+
+func _aspect(tex: Texture2D) -> float:
+	var tex_h: float = float(tex.get_height())
+	var tex_w: float = float(tex.get_width())
+	return tex_w / tex_h if tex_h > 0.0 else 1.0
 
 func _process(delta: float) -> void:
 	_update_stress(delta)
@@ -93,8 +91,6 @@ func _update_stress(delta: float) -> void:
 
 	var dir: float = wind.direction if wind.direction != 0.0 else 1.0
 	var wall_h: float = h * 0.42
-
-	_tear_roof_chunks(dir)
 
 	if _last_stress < 0.65 and _stress >= 0.65:
 		DebrisSpawner.burst(entities_parent, position.x + _w * 0.25, position.y - wall_h,
@@ -115,59 +111,15 @@ func _update_stress(delta: float) -> void:
 		_collapsed = true
 	_last_stress = _stress
 
-func _tear_roof_chunks(dir: float) -> void:
-	var changed: bool = false
-	while _torn_count < roof_chunks.size() and _torn_count < TEAR_THRESHOLDS.size() and _stress >= TEAR_THRESHOLDS[_torn_count]:
-		var rect: Rect2i = roof_chunks[_torn_count]
-		_display_image.fill_rect(rect, Color(0.0, 0.0, 0.0, 0.0))
-		changed = true
-		var wpos: Vector2 = _chunk_world_pos(rect)
-		DebrisSpawner.burst(entities_parent, wpos.x, wpos.y,
-			4, [roof_color, roof_shadow_color, Palette.c("rubbleWood")], _w * 0.18, dir)
-		_torn_count += 1
-	if changed:
-		_display_texture.update(_display_image)
-
-## Texture-pixel-space chunk center -> world position, through the same
-## mapping _draw() uses to place the sprite (top-left at
-## (-_w/2, -h), full h/_w size) — keeps torn debris starting from
-## roughly where the hole actually appears regardless of house scale.
-func _chunk_world_pos(rect: Rect2i) -> Vector2:
-	var cx: float = rect.position.x + rect.size.x / 2.0
-	var cy: float = rect.position.y + rect.size.y / 2.0
-	var tex_w: float = float(texture.get_width())
-	var tex_h: float = float(texture.get_height())
-	var local_x: float = -_w / 2.0 + (cx / tex_w) * _w
-	var local_y: float = -h + (cy / tex_h) * h
-	return position + Vector2(local_x, local_y)
-
 func _draw() -> void:
-	var crack_t: float = clamp((_stress - 0.40) / 0.25, 0.0, 1.0)
+	var crack_t: float = clamp((_stress - 0.40) / 0.35, 0.0, 1.0)
 	var cut_point: float = 0.985 + (seeded(_house_seed + 12) - 0.5) * 0.02
 	if _stress >= cut_point:
 		_draw_rubble()
 		return
-	draw_texture_rect(_display_texture, Rect2(-_w / 2.0, -h, _w, h), false)
+	draw_texture_rect(texture, Rect2(-_w / 2.0, -h, _w, h), false)
 	if crack_t > 0.01:
-		_draw_cracks(crack_t)
-
-func _draw_cracks(crack_t: float) -> void:
-	var crack_color := Color(35.0 / 255.0, 25.0 / 255.0, 20.0 / 255.0, 0.7 * crack_t)
-	_draw_crack_line(-_w * 0.05, -h * 0.55, _house_seed, h * 0.35, _w * 0.12, crack_color)
-	if crack_t > 0.5:
-		_draw_crack_line(_w * 0.15, -h * 0.45, _house_seed + 4.0, h * 0.30, _w * 0.10, crack_color)
-	if crack_t > 0.8:
-		_draw_crack_line(-_w * 0.28, -h * 0.35, _house_seed + 8.0, h * 0.22, _w * 0.08, crack_color)
-
-func _draw_crack_line(x: float, y: float, seed: float, length: float, wobble: float, color: Color) -> void:
-	var points := PackedVector2Array()
-	points.append(Vector2(x, y))
-	var steps: int = 4
-	for i in range(1, steps + 1):
-		var yy: float = y + (length * i) / steps
-		var xx: float = x + (seeded(seed + i) - 0.5) * wobble
-		points.append(Vector2(xx, yy))
-	draw_polyline(points, color, 1.0)
+		draw_texture_rect(texture_damaged, Rect2(-_w_damaged / 2.0, -h, _w_damaged, h), false, Color(1.0, 1.0, 1.0, crack_t))
 
 func _draw_rubble() -> void:
 	var wall_h: float = h * 0.42
