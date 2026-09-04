@@ -6,33 +6,42 @@ extends PixelDrawer
 ## reference art's rounded shingle tiles, half-timbering, cracked plaster
 ## and broken shutters aren't realistically reproducible with this
 ## renderer's flat-shaded pixel primitives, and exact visual fidelity to
-## the references was the explicit ask here. A first pass tried keeping
-## the intact sprite untouched and only spawning debris on top, then
-## tearing literal chunks out of it as stress rose — dropped now that a
-## proper damaged-state reference image exists: it shows cracked walls,
-## broken windows/shutters and missing roof tiles all at once, in the
-## same hand-painted style as the intact art, which no amount of
-## procedural chunk-punching was going to match.
+## the references was the explicit ask here.
 ##
-## Damage is a crossfade between the two full textures — draw_texture_rect
-## twice, the damaged one on top with its own alpha ramped by crack_t —
-## rather than a hard swap, so it still reads as gradual wear and not an
-## instant change (the original's own stated design goal, still true
-## here). Each texture keeps its own aspect ratio (_w vs _w_damaged): the
-## two reference crops aren't pixel-aligned to each other, so stretching
-## both into one shared rect would visibly warp whichever one doesn't
-## match; independent aspect-correct scaling, both anchored bottom-
-## center at the same ground point, is the honest compromise without
-## hand-registering every pair of images.
+## Damage reveals the damaged texture through a fixed GRID_COLS x
+## GRID_ROWS grid of cells rather than a soft alpha crossfade: each cell
+## has its own seeded reveal threshold (biased so upper/roof rows tend to
+## flip before lower/wall rows, matching wind hitting the roof first),
+## and _update_stress() permanently flips a cell from intact to damaged
+## the moment stress crosses that cell's threshold — permanently, same as
+## every other piece of wind damage in this game never healing once it
+## happens. This reads as the sprite actually breaking apart in blocky
+## chunks, matching the game's hard-edged pixel-art style, instead of the
+## smooth dissolve an alpha fade gives — a first pass used exactly that
+## fade and it read as too soft/unphysical once tested.
 ##
-## Debris still bursts at fixed stress thresholds, same as before — that
-## part was never about matching a specific torn spot, so it doesn't need
-## the sprite mutation the old approach used it to justify.
+## Both textures are drawn into the SAME destination rect (driven by the
+## intact texture's own aspect ratio) rather than each at its own native
+## aspect ratio — a first pass let the damaged texture size itself
+## independently and it visibly grew/shrank relative to the intact
+## sprite the moment any cell revealed, since the two reference crops
+## aren't the same aspect ratio. Per-cell src_rect regions still sample
+## the damaged texture's own pixel dimensions (not warped, just addressed
+## by fraction), so this is a one-time shared-footprint fix, not a
+## per-cell distortion.
+##
+## Debris still bursts at fixed stress thresholds, same as before —
+## that's a separate physical read (things flying off) layered on top of
+## the visual one (the sprite itself changing), not tied to any specific
+## cell.
 ##
 ## Full collapse is still the old procedural rubble pile — reference art
 ## for actual ruin debris is a later pass. resilience / no-respawn /
 ## no-recovery-from-collapse behaviour is unchanged — see tree_sprite.gd's
 ## own header for the "no respawn" product decision this follows.
+
+const GRID_COLS := 5
+const GRID_ROWS := 6
 
 var h: float
 var texture: Texture2D
@@ -46,11 +55,11 @@ var wind: WindEngine
 var entities_parent: Node2D
 
 var _w: float
-var _w_damaged: float
 var _house_seed: float
 var _stress: float = 0.0
 var _last_stress: float = 0.0
 var _collapsed: bool = false
+var _revealed: Array = []
 
 func setup(p_h: float, p_texture: Texture2D, p_texture_damaged: Texture2D, p_wall: Color, p_wall_shadow: Color, p_roof: Color, p_roof_shadow: Color,
 		p_resilience: float, p_seed: float, p_wind: WindEngine, p_entities_parent: Node2D) -> void:
@@ -65,14 +74,20 @@ func setup(p_h: float, p_texture: Texture2D, p_texture_damaged: Texture2D, p_wal
 	_house_seed = p_seed
 	wind = p_wind
 	entities_parent = p_entities_parent
-	_w = h * _aspect(texture)
-	_w_damaged = h * _aspect(texture_damaged)
+	var tex_h: float = float(texture.get_height())
+	var tex_w: float = float(texture.get_width())
+	_w = h * (tex_w / tex_h if tex_h > 0.0 else 1.0)
+	_revealed.resize(GRID_COLS * GRID_ROWS)
+	_revealed.fill(false)
 	queue_redraw()
 
-func _aspect(tex: Texture2D) -> float:
-	var tex_h: float = float(tex.get_height())
-	var tex_w: float = float(tex.get_width())
-	return tex_w / tex_h if tex_h > 0.0 else 1.0
+## Deterministic per-cell reveal point in [0,1] — a row bias (0 at the
+## roof, rising toward the base) plus per-cell jitter from the house's
+## own seed, so every house's crumble pattern is fixed but different.
+func _cell_threshold(col: int, row: int) -> float:
+	var row_bias: float = (float(row) / float(GRID_ROWS - 1)) * 0.35
+	var n: float = seeded(_house_seed + col * 7.3 + row * 13.1 + 50.0)
+	return clamp(0.12 + row_bias + (n - 0.5) * 0.55, 0.0, 0.97)
 
 func _process(delta: float) -> void:
 	_update_stress(delta)
@@ -91,6 +106,13 @@ func _update_stress(delta: float) -> void:
 
 	var dir: float = wind.direction if wind.direction != 0.0 else 1.0
 	var wall_h: float = h * 0.42
+	var crack_t: float = clamp((_stress - 0.40) / 0.35, 0.0, 1.0)
+
+	for row in range(GRID_ROWS):
+		for col in range(GRID_COLS):
+			var idx: int = row * GRID_COLS + col
+			if not _revealed[idx] and crack_t >= _cell_threshold(col, row):
+				_revealed[idx] = true
 
 	if _last_stress < 0.65 and _stress >= 0.65:
 		DebrisSpawner.burst(entities_parent, position.x + _w * 0.25, position.y - wall_h,
@@ -112,14 +134,25 @@ func _update_stress(delta: float) -> void:
 	_last_stress = _stress
 
 func _draw() -> void:
-	var crack_t: float = clamp((_stress - 0.40) / 0.35, 0.0, 1.0)
 	var cut_point: float = 0.985 + (seeded(_house_seed + 12) - 0.5) * 0.02
 	if _stress >= cut_point:
 		_draw_rubble()
 		return
 	draw_texture_rect(texture, Rect2(-_w / 2.0, -h, _w, h), false)
-	if crack_t > 0.01:
-		draw_texture_rect(texture_damaged, Rect2(-_w_damaged / 2.0, -h, _w_damaged, h), false, Color(1.0, 1.0, 1.0, crack_t))
+
+	var dmg_w: float = float(texture_damaged.get_width())
+	var dmg_h: float = float(texture_damaged.get_height())
+	var cell_w: float = _w / GRID_COLS
+	var cell_h: float = h / GRID_ROWS
+	var src_cell_w: float = dmg_w / GRID_COLS
+	var src_cell_h: float = dmg_h / GRID_ROWS
+	for row in range(GRID_ROWS):
+		for col in range(GRID_COLS):
+			if not _revealed[row * GRID_COLS + col]:
+				continue
+			var dst := Rect2(-_w / 2.0 + col * cell_w, -h + row * cell_h, cell_w, cell_h)
+			var src := Rect2(col * src_cell_w, row * src_cell_h, src_cell_w, src_cell_h)
+			draw_texture_rect_region(texture_damaged, dst, src)
 
 func _draw_rubble() -> void:
 	var wall_h: float = h * 0.42
