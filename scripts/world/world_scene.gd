@@ -45,6 +45,25 @@ extends Node2D
 ## ratio varies by viewport. All of this is plain reusable geometry, not
 ## tied to the current static defs arrays, so it applies the same way to
 ## any future dynamic spawn — there just isn't one yet.
+##
+## The windmill (_add_windmill) is a HouseSprite too, now that real
+## reference art exists for it (assets/windmill/) — requested explicitly:
+## same logic as the 5 houses rather than an independent system, and
+## HouseSprite has nothing house-specific baked into it (the wall/roof
+## colour params only tint debris), so it's a straight reuse, zero
+## changes to house_sprite.gd itself. Its footprint feeds into the same
+## tree-avoidance array _add_houses()'s rects do. Position/size moved
+## from the old procedural windmill's (fx=0.90, fy=0.36, h=u*0.32): that
+## windmill drew a narrow tower via pxRect primitives, but the real
+## reference art is a ~1:1 square (the diagonal sails reach almost to the
+## canvas edges) — nearly 3x wider, at the same height, than the old
+## procedural approximation. Kept at fx=0.90 it clipped off the right
+## edge on portrait/narrow viewports and overlapped the blue/purple
+## houses; confirmed by computing every house's and the windmill's real
+## rect (same formula _add_houses() uses) across a wide battery of
+## resolutions (390x844 up to 3440x1440, plus square and tall-phone
+## ratios). (fx=0.76, fy=0.54, h=u*0.30) is the largest footprint found
+## clear of all 5 houses and the screen edges across that whole set.
 
 var entities: Node2D
 var _wind: WindEngine
@@ -80,7 +99,8 @@ func build(logical_w: float, logical_h: float) -> void:
 	add_child(entities)
 
 	var house_rects: Array = _add_houses(gx, gy, u)
-	_add_trees(gx, gy, u, house_rects)
+	var windmill_rect: Rect2 = _add_windmill(gx, gy, u)
+	_add_trees(gx, gy, u, house_rects + [windmill_rect])
 	_add_decor(gx, gy, ground_h, u)
 
 	var weather := WeatherLayer.new()
@@ -120,6 +140,8 @@ const HOUSE_TEXTURES_DAMAGED := {
 	"roofBlue": preload("res://assets/houses/house_blue_damaged.png"),
 	"roofPurple": preload("res://assets/houses/house_purple_damaged.png"),
 }
+const WINDMILL_TEXTURE := preload("res://assets/windmill/windmill.png")
+const WINDMILL_TEXTURE_DAMAGED := preload("res://assets/windmill/windmill_damaged.png")
 
 ## Returns each house's exact destination rect (post-overlap-resolution)
 ## so _add_trees() can keep trees out of them — see the class header for
@@ -190,6 +212,34 @@ func _resolve_house_positions(defs: Array, sizes: Array, gx: Callable, gy: Calla
 		if not moved:
 			break
 	return positions
+
+## Same HouseSprite class the 5 houses use, real windmill reference art
+## (assets/windmill/) as its texture pair instead — see class header for
+## why it's positioned differently than the old procedural windmill was.
+## Not part of _add_houses()'s own `defs`/loop (keeps "5 houses" an exact
+## count and this a distinct, findable block) but returns its rect the
+## same way, so it slots into the same tree-avoidance array a house's
+## rect would. resilience/seed follow the houses' own per-index formula,
+## continued at index 5 (the houses use 0-4) rather than a bespoke
+## constant, so it's drawn from the same deterministic scheme, not a
+## special case. size_tier 2 (large): the tallest single structure in the
+## village, its collapse should read at least as substantial as the
+## blue/purple houses'.
+func _add_windmill(gx: Callable, gy: Callable, u: float) -> Rect2:
+	var h_mill: float = u * 0.30
+	var w_mill: float = h_mill * (float(WINDMILL_TEXTURE.get_width()) / float(WINDMILL_TEXTURE.get_height()))
+	var pos := Vector2(gx.call(0.76), gy.call(0.54))
+
+	var mill := HouseSprite.new()
+	mill.position = pos
+	mill.setup(
+		h_mill, WINDMILL_TEXTURE, WINDMILL_TEXTURE_DAMAGED,
+		Palette.c("stone"), Palette.c("stoneDark"),
+		Palette.c("roofBlue"), Palette.c("roofBlueShadow"),
+		0.75 + _seeded(5 * 9.1) * 0.6, 5 * 4.1 + 3.0, _wind, entities, 2,
+	)
+	entities.add_child(mill)
+	return Rect2(pos.x - w_mill / 2.0, pos.y - h_mill, w_mill, h_mill)
 
 ## house_rects: exact destination rects from _add_houses(), already
 ## resolved against each other — trees are kept clear of these AND of
@@ -294,11 +344,6 @@ func _add_decor(gx: Callable, gy: Callable, ground_h: float, u: float) -> void:
 	lamp.position = Vector2(gx.call(0.44), gy.call(0.42))
 	lamp.setup(ground_h * 0.34)
 	entities.add_child(lamp)
-
-	var windmill := WindmillSprite.new()
-	windmill.position = Vector2(gx.call(0.90), gy.call(0.36))
-	windmill.setup(ground_h * 0.32, _wind, entities)
-	entities.add_child(windmill)
 
 	var bush_defs := [{"fx": 0.40, "fy": 0.35}, {"fx": 0.665, "fy": 0.37}]
 	for b in bush_defs:
