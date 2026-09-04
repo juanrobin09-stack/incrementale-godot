@@ -4,23 +4,39 @@ extends PixelDrawer
 ## a small child of the windmill's own HouseSprite — NOT a texture.
 ##
 ## The real reference art has no separable blade layer (one flat painted
-## image, tower and sails together), so a first pass extracted the sails
-## by image processing (hub detection, geometric/colour masking,
-## inpainting the tower underneath) and mirrored the one cleanly-
-## separable sail into a 4-fold rotor. That held up in isolated renders
-## but not once actually seen in the game: this renderer scales its low-
+## image, tower and sails together). A first pass extracted the sails by
+## image processing and mirrored the one cleanly-separable sail into a
+## 4-fold rotor, texture and all — that held up in isolated renders but
+## not once actually seen in the game: this renderer scales its low-
 ## resolution canvas up WITHOUT smoothing to keep the pixel-art look
 ## (world_viewport_host.gd), and fine painted gradient detail turns to
 ## mush under that nearest-neighbour scaling at the sail's small on-
-## screen size — reported directly ("ressemble à rien"). This is exactly
-## why every OTHER small/thin element in this renderer (trees, lamppost,
-## fence, bushes...) is flat-shaded procedural primitives rather than
-## painted art in the first place; the sails just hadn't been brought in
-## line with that yet. Tower stays the real reference art (large enough
-## to hold up fine, same as the houses) — reverted to the ORIGINAL,
-## unmodified PNGs, no inpainting attempt at all, since the inpainted
-## version was the other half of the same first pass and isn't needed
-## anymore now the sails aren't cut out of it.
+## screen size ("ressemble à rien"). Reverting to flat-shaded procedural
+## sails on the ORIGINAL, untouched tower fixed that — but left the
+## original painted sails still visibly crossing the tower underneath
+## the new ones (reported directly, screenshot: "on voit toujours les
+## petites hélices derrière"), since only the overlay changed, not the
+## art it's drawn on top of.
+##
+## Reinstated the inpainted tower (assets/windmill/windmill*.png, the
+## original blade crossing removed and the gap filled — radial copy on
+## the roof cone, a soft neighbourhood-average fill on the wall/window
+## area, see git history for the extraction script) alongside these
+## procedural sails, so there's exactly one set of blades, not two.
+## Re-verified this time with the CORRECT methodology for each half: the
+## tower is a TEXTURE stretched into a small destination rect, so
+## nearest-neighbour minification is a fair proxy for how it actually
+## samples; these sails are VECTOR shapes Godot rasterizes NATIVELY at
+## the small on-screen size, not drawn "big" and downsampled afterwards
+## — composited at that same small scale before judging it, which is
+## what caught the first mistake in the first place.
+##
+## Also sized down (blade length 0.30h → 0.24h, half-width now scaled
+## BY h too instead of fixed absolute pixels) after a report that the
+## first pass read as disproportionate — thickness now tracks length so
+## the sails keep the same silhouette regardless of the windmill's
+## actual on-screen size at a given resolution, rather than a fixed
+## pixel width that would read thin at some sizes and chunky at others.
 ##
 ## Cream sail + dark wood trim to roughly match the reference art's own
 ## blade palette (not the old red-roofed procedural windmill's
@@ -60,9 +76,9 @@ func _process(delta: float) -> void:
 	queue_redraw()
 
 func _draw() -> void:
-	var blade_len: float = h * 0.30
-	var min_hw: float = 1.2
-	var max_hw: float = 4.0
+	var blade_len: float = h * 0.24
+	var min_hw: float = h * 0.017
+	var max_hw: float = h * 0.05
 	var sail: Color = Palette.c("wallCream")
 	var sail_shadow: Color = Palette.c("wallCreamShadow")
 	var trim: Color = Palette.c("woodDark")
@@ -76,6 +92,6 @@ func _draw() -> void:
 			draw_rect(Rect2(blade_len * t0, -hw, blade_len * (t1 - t0) + 0.5, hw * 2.0), sail)
 		var tip_w: float = blade_len * 0.22
 		draw_rect(Rect2(blade_len - tip_w, -max_hw, tip_w, max_hw * 2.0), sail_shadow)
-		draw_line(Vector2.ZERO, Vector2(blade_len, 0), trim, 1.6)
+		draw_line(Vector2.ZERO, Vector2(blade_len, 0), trim, max(1.0, h * 0.012))
 	draw_set_transform(Vector2.ZERO, 0.0)
-	draw_circle(Vector2.ZERO, 2.8, trim)
+	draw_circle(Vector2.ZERO, h * 0.045, trim)
