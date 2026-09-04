@@ -6,6 +6,17 @@ extends PixelDrawer
 ## tree standing back up after a calm-wind cooldown) is deliberately not
 ## ported — explicit product decision: fallen trees stay down for good.
 ##
+## Bend amplitude and branch/foliage flutter speed both get an extra
+## LEVEL_BEND_MUL/LEVEL_FLUTTER_MUL boost on top of whatever wind.force
+## itself already gives (see WindEngine's own per-level widening) —
+## reported that the jump between wind levels wasn't visible enough, and
+## force alone scaling everything linearly meant a tree's reaction grew
+## only as fast as force did, level over level, rather than reading as a
+## distinct step up in violence. Only ever scales the existing sway/
+## flutter formulas — this node's own `position` (the trunk's ground
+## anchor) is never touched by any of it, so however hard a tree sways
+## it never drifts from its planted spot.
+##
 ## Falling/fallen no longer need the original's manual
 ## ctx.translate/rotate/translate-back dance around the tree's own base
 ## — that's just this node's own `rotation`, which Godot already applies
@@ -36,6 +47,16 @@ extends PixelDrawer
 ## connected mass swaying together, rather than a few extra amplified
 ## pixels on an already-wide shape.
 
+## How much MORE a tree reacts at each wind level, beyond what the wider
+## per-level force range (see WindEngine) already gives for free — bend
+## amplitude and flutter (shake) speed are tuned separately since
+## "rafales plus violentes" and "rafales plus rapides" are two distinct
+## asks. Levels 0-1 unchanged (a light breeze shouldn't get an artificial
+## boost); level 3 noticeably amplified so it reads as unmistakably
+## violent next to level 2, not just "a bit more of the same".
+const LEVEL_BEND_MUL := [1.0, 1.0, 1.3, 1.75]
+const LEVEL_FLUTTER_MUL := [1.0, 1.0, 1.25, 1.6]
+
 var tree_type: String
 var width: float
 var height: float
@@ -50,6 +71,7 @@ var _strain: float = 0.0
 var _fall_progress: float = 0.0
 var _fall_angle: float = 0.0
 var _fall_dir: float = 1.0
+var _wind_level: int = 0
 
 func setup(p_type: String, p_width: float, p_height: float, p_flex: float, p_seed: float, p_wind: WindEngine, p_entities_parent: Node2D) -> void:
 	tree_type = p_type
@@ -62,14 +84,14 @@ func setup(p_type: String, p_width: float, p_height: float, p_flex: float, p_see
 	queue_redraw()
 
 func _process(delta: float) -> void:
+	_wind_level = GameState.compute_stage("wind")
 	_update_fall_state(delta)
 	rotation = _fall_angle
 	queue_redraw()
 
 func _update_fall_state(delta: float) -> void:
 	if _state == "standing":
-		var wind_level: int = GameState.compute_stage("wind")
-		if wind_level >= 3 and wind.force > 0.82:
+		if _wind_level >= 3 and wind.force > 0.82:
 			var flex_div: float = flex if flex != 0.0 else 1.0
 			_strain += delta * (wind.force - 0.8) * 0.5 / flex_div
 		else:
@@ -120,7 +142,9 @@ func _draw() -> void:
 	_draw_structure(origin_x, eff_force, eff_dir, eff_t)
 
 func _draw_structure(origin_x: float, force: float, direction: float, t: float) -> void:
-	var bend_max: float = height * (0.22 if tree_type == "pine" else 0.30) * flex
+	var level_bend_mul: float = LEVEL_BEND_MUL[_wind_level] if _wind_level < LEVEL_BEND_MUL.size() else 1.0
+	var level_flutter_mul: float = LEVEL_FLUTTER_MUL[_wind_level] if _wind_level < LEVEL_FLUTTER_MUL.size() else 1.0
+	var bend_max: float = height * (0.22 if tree_type == "pine" else 0.30) * flex * level_bend_mul
 	var bend: float = direction * force * bend_max
 	var trunk_h: float = height * (0.32 if tree_type == "pine" else 0.42)
 	var base_w: float = max(2.0, width * 0.16)
@@ -158,7 +182,7 @@ func _draw_structure(origin_x: float, force: float, direction: float, t: float) 
 		var base_y: float = -trunk_h * b["hf"]
 		var base_bend: float = bend * pow(b["hf"], 1.6)
 		var base_x: float = origin_x + base_bend
-		var flutter: float = 0.5 + 0.5 * sin(t * (3.2 + i * 0.7) + seed_val * 6.0 + i)
+		var flutter: float = 0.5 + 0.5 * sin(t * (3.2 + i * 0.7) * level_flutter_mul + seed_val * 6.0 + i)
 		var secondary: float = flutter * force * direction * flex * 0.35
 		var angle: float = b["ang"] + secondary + bend * 0.01
 		var len_: float = width * b["len"]
@@ -188,7 +212,7 @@ func _draw_structure(origin_x: float, force: float, direction: float, t: float) 
 		_draw_foliage_cluster(tip.x, tip.y - width * 0.18, width * 0.4, leaf_light, leaf_mid, leaf_dark, leaf_pale, seed_val + 50.0)
 		for i in range(tips.size()):
 			var tp: Vector2 = tips[i]
-			var puff_flutter: float = 0.5 + 0.5 * sin(t * 6.0 + seed_val * 9.0 + i)
+			var puff_flutter: float = 0.5 + 0.5 * sin(t * 6.0 * level_flutter_mul + seed_val * 9.0 + i)
 			var j: float = puff_flutter * force * direction * 1.2
 			_draw_foliage_cluster(tp.x + j, tp.y + j * 0.4, width * 0.26, leaf_light, leaf_mid, leaf_dark, leaf_pale, seed_val + i * 17.0 + 60.0)
 

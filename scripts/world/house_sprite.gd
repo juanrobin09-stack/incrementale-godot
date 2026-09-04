@@ -102,6 +102,15 @@ const GRID_COLS := 5
 const GRID_ROWS := 6
 const FINE_CELL_PX := 10.0
 const COLLAPSE_TRIGGER := 0.95
+## Pure quantity/density knob on the "intact" tremor's crack coverage
+## (reported: slightly too many fissures show up during the transition) —
+## deliberately NOT a change to FINE_CELL_PX (that controls granularity —
+## how big each crack patch reads as — and was tuned earlier specifically
+## to avoid "obvious squares", touching it risks reintroducing that), nor
+## to pacing, thresholds' shape, reserved cells, or the collapse sequence.
+## Only a fraction of the non-reserved fine cells are even eligible to
+## dissolve at all; see _fine_threshold.
+const CRACK_KEEP_FRACTION := 0.7
 
 var h: float
 var texture: Texture2D
@@ -355,7 +364,21 @@ func _cell_threshold(col: int, row: int) -> float:
 
 ## Same idea, for the fine dissolve grid — separate salt/coefficients so
 ## it isn't just a scaled repeat of the macro pattern.
+##
+## The CRACK_KEEP_FRACTION gate at the top is a separate, independently-
+## salted seeded() roll (250.0, not reused anywhere else on this fx/fy
+## pattern) rather than folded into the same roll as the threshold below —
+## keeping the two draws independent means which cells get excluded isn't
+## correlated with their would-be threshold, so the excluded cells are an
+## unbiased subset rather than skewing toward e.g. only the early-cracking
+## ones. A gated-out cell returns a threshold crack_t can never reach
+## (crack_t itself is clamped to 1.0), so it simply never dissolves —
+## permanently showing intact art at that one fine cell, same as a
+## reserved cell's own exclusion, just decided independently per-cell
+## instead of in reserved macro-cell blocks.
 func _fine_threshold(fx: int, fy: int) -> float:
+	if seeded(_house_seed + fx * 2.7 + fy * 4.1 + 250.0) >= CRACK_KEEP_FRACTION:
+		return 999.0
 	var row_bias: float = (float(fy) / float(_fine_rows - 1)) * 0.35
 	var n: float = seeded(_house_seed + fx * 2.7 + fy * 4.1 + 150.0)
 	return clamp(0.12 + row_bias + (n - 0.5) * 0.55, 0.0, 0.97)
