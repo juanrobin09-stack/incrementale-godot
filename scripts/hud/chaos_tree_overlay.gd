@@ -49,20 +49,69 @@ extends Control
 ## 0.985) — the previous near-opaque value let a sliver of the bright
 ## world scene behind bleed through at full-screen scale, which likely
 ## read as part of the "doesn't look different" impression too.
+##
+## Explicitly asked for next: not an approximation "inspired by" the
+## reference, but the reference's own pixels used directly, the same way
+## the houses use their provided PNGs rather than a procedural drawing —
+## confirmed first (small crop tests) that this environment's image tools
+## (PIL, already used earlier this project for the windmill texture) can
+## actually cut clean pieces out of chaos-tree-reference.png, then asked
+## which of two paths to take: crop reusable pieces out of the single
+## reference screenshot already provided, or wait for separately exported
+## per-element files the way the houses eventually got one PNG each.
+## Answered: crop it now, ask instead of guessing if that turns out not
+## to be possible. It was possible. assets/chaos_tree/ holds what came out
+## of chaos-tree-reference.png: node_locked.png/node_frame.png/
+## node_core.png (one representative node tile per state — every locked
+## node in the reference already shows the same generic padlock baked in,
+## so that tile is directly reusable everywhere locked; node_frame.png is
+## one representative unlocked tile reused for every non-core, non-locked
+## node regardless of its own baked-in icon, since the reference has no
+## spare unlocked node whose art is actually meant to be generic), plus
+## background.png (a clean stone-wall swatch, tiled), title_icon.png (the
+## header's spiral mark) and corner_sparkle.png (one accent reused at all
+## 4 corners, the reference only shows this decoration once per corner
+## anyway). These are StyleBoxTexture fills now, not StyleBoxFlat colour —
+## see _tile_style(). Per-node emoji glyphs are still drawn on top of
+## node_frame.png for everything except core/locked (those two states'
+## textures already have their one-and-only icon baked in, so their emoji
+## is cleared instead of doubling up) — the emoji were never the
+## complaint, only the flat frame around them was, and this engine still
+## has no way to paint 20-odd distinct custom icons from nothing. Header
+## buttons and the inspector's buy button keep the drawn-bevel
+## TreeNodeButton treatment from the previous pass rather than reusing
+## node_frame.png too — that tile's own baked-in pebble icon fighting
+## with a −/+/⌖/✕ glyph in the same small square read worse in a quick
+## check than the plain bevel already did, and nothing about those
+## buttons was reported as a problem.
 
 const TREE_RADIUS_STEP := 150.0
 const TREE_CANVAS_SIZE := 2000.0
 const TREE_CENTER := 1000.0
 
 # ---------------------------------------------------------------------------
+# Real crops from chaos-tree-reference.png (see class header) — not
+# procedural. TEX_MARGIN is this project's own judgement call, not measured
+# from the source: roughly the bevel width visible in the crops, kept as a
+# fixed corner/edge so StyleBoxTexture 9-patches instead of stretching the
+# whole tile (and its baked-in icon) out of shape at button sizes other
+# than the ~64-93px the crops themselves are.
+# ---------------------------------------------------------------------------
+const NODE_LOCKED_TEX := preload("res://assets/chaos_tree/node_locked.png")
+const NODE_FRAME_TEX := preload("res://assets/chaos_tree/node_frame.png")
+const NODE_CORE_TEX := preload("res://assets/chaos_tree/node_core.png")
+const BACKGROUND_TEX := preload("res://assets/chaos_tree/background.png")
+const TITLE_ICON_TEX := preload("res://assets/chaos_tree/title_icon.png")
+const CORNER_SPARKLE_TEX := preload("res://assets/chaos_tree/corner_sparkle.png")
+const TEX_MARGIN := 10
+
+# ---------------------------------------------------------------------------
 # Stone/violet palette for this overlay only — the rest of the HUD is still
 # on Godot's default theme (see README: a full HUD fidelity pass is its own
 # later, separately-scoped task, not part of this one).
 # ---------------------------------------------------------------------------
-const COL_BG := Color(0.055, 0.048, 0.043, 1.0)
 const COL_STONE := Color(0.145, 0.125, 0.107, 1.0)
 const COL_STONE_LIGHT := Color(0.205, 0.178, 0.148, 1.0)
-const COL_LOCKED_BG := Color(0.085, 0.075, 0.065, 1.0)
 const COL_BORDER := Color(0.34, 0.30, 0.25, 1.0)
 const COL_GOLD := Color(0.87, 0.71, 0.33, 1.0)
 const COL_GOLD_DIM := Color(0.56, 0.46, 0.28, 1.0)
@@ -99,8 +148,10 @@ func _ready() -> void:
 	UiUtil.fill_parent(self)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
-	var dim := ColorRect.new()
-	dim.color = COL_BG
+	var dim := TextureRect.new()
+	dim.texture = BACKGROUND_TEX
+	dim.stretch_mode = TextureRect.STRETCH_TILE
+	dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	UiUtil.fill_parent(dim)
 	add_child(dim)
 
@@ -123,13 +174,13 @@ func _ready() -> void:
 	_build_nodes()
 	_build_corner_sparkles()
 
-## Small ✦ accents in the 4 corners of the overlay, matching the
-## reference's own corner decoration — purely decorative, anchored
-## directly to `self` rather than the margined content column so they
-## sit at the true screen corners.
+## The reference's own corner decoration (corner_sparkle.png, one crop
+## reused at all 4 corners — see class header), purely decorative,
+## anchored directly to `self` rather than the margined content column so
+## it sits at the true screen corners.
 func _build_corner_sparkles() -> void:
-	var box_size := 26.0
-	var inset := 10.0
+	var box_size := 32.0
+	var inset := 8.0
 	# Each entry pins a box_size x box_size square to one corner via a zero-size anchor
 	# point (anchor_left==anchor_right, anchor_top==anchor_bottom) plus all
 	# four offsets set explicitly — same reasoning as UiUtil.fill_parent's
@@ -145,12 +196,10 @@ func _build_corner_sparkles() -> void:
 		{"ax": 1.0, "ay": 1.0, "l": -inset - box_size, "t": -inset - box_size},
 	]
 	for c in corners:
-		var spark := Label.new()
-		spark.text = "✦"
-		spark.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		spark.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		spark.add_theme_color_override("font_color", Color(COL_PURPLE.r, COL_PURPLE.g, COL_PURPLE.b, 0.75))
-		spark.add_theme_font_size_override("font_size", 20)
+		var spark := TextureRect.new()
+		spark.texture = CORNER_SPARKLE_TEX
+		spark.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		spark.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		spark.anchor_left = c["ax"]
 		spark.anchor_right = c["ax"]
 		spark.anchor_top = c["ay"]
@@ -177,7 +226,22 @@ func _stone_style(bg: Color, border: Color, border_w: int, radius: int, glow: bo
 		sb.shadow_size = 7
 	return sb
 
-func _apply_button_style(btn: Button, sb: StyleBoxFlat, font_color: Color, font_size: int) -> void:
+## One real crop (see class header) used as a StyleBoxTexture fill, 9-patched
+## by TEX_MARGIN so it doesn't stretch out of shape at a button size other
+## than the crop's own. `modulate` tints the same tile for state feedback
+## (gold for purchased, dimmed for unaffordable/locked) instead of needing a
+## separately-painted tile per state this environment has no way to produce.
+func _tile_style(tex: Texture2D, modulate: Color = Color.WHITE) -> StyleBoxTexture:
+	var sb := StyleBoxTexture.new()
+	sb.texture = tex
+	sb.texture_margin_left = TEX_MARGIN
+	sb.texture_margin_top = TEX_MARGIN
+	sb.texture_margin_right = TEX_MARGIN
+	sb.texture_margin_bottom = TEX_MARGIN
+	sb.modulate_color = modulate
+	return sb
+
+func _apply_button_style(btn: Button, sb: StyleBox, font_color: Color, font_size: int) -> void:
 	for state in ["normal", "hover", "pressed", "focus", "disabled"]:
 		btn.add_theme_stylebox_override(state, sb)
 	btn.add_theme_color_override("font_color", font_color)
@@ -191,11 +255,22 @@ func _build_header(parent: Node) -> void:
 	header.add_theme_constant_override("separation", 10)
 	parent.add_child(header)
 
+	var title_box := HBoxContainer.new()
+	title_box.add_theme_constant_override("separation", 6)
+	header.add_child(title_box)
+
+	var title_icon := TextureRect.new()
+	title_icon.texture = TITLE_ICON_TEX
+	title_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	title_icon.custom_minimum_size = Vector2(28, 28)
+	title_box.add_child(title_icon)
+
 	var title := Label.new()
-	title.text = "🌀 ARBRE DU CHAOS"
+	title.text = "ARBRE DU CHAOS"
 	title.add_theme_color_override("font_color", COL_GOLD)
 	title.add_theme_font_size_override("font_size", 22)
-	header.add_child(title)
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	title_box.add_child(title)
 
 	var badge_panel := PanelContainer.new()
 	badge_panel.add_theme_stylebox_override("panel", _stone_style(COL_STONE, COL_GOLD_DIM, 2, 10))
@@ -322,13 +397,12 @@ func _build_nodes() -> void:
 
 	for id in GameData.UPGRADE_TREE:
 		var pos: Vector2 = positions[id]
-		var btn := TreeNodeButton.new()
-		btn.bevel = true
+		var btn := Button.new()
 		btn.custom_minimum_size = Vector2(64, 64)
 		btn.size = Vector2(64, 64)
 		btn.position = pos - Vector2(32, 32)
 		btn.pressed.connect(_make_node_press_handler(id))
-		_apply_button_style(btn, _stone_style(COL_STONE, COL_BORDER, 2, 6), COL_TEXT, 26)
+		_apply_button_style(btn, _tile_style(NODE_FRAME_TEX), COL_TEXT, 26)
 		_tree_canvas.add_child(btn)
 		_node_buttons[id] = btn
 
@@ -377,62 +451,53 @@ func _process(_delta: float) -> void:
 	if _selected_id != "":
 		_refresh_inspector()
 
+## core/locked nodes use a texture that already has its one-and-only icon
+## (the spiral glow, the padlock) baked in from the reference, so their
+## emoji is cleared instead of doubling up on top of it — every other node
+## keeps its own emoji over the shared node_frame.png tile (see class
+## header for why that tile isn't also icon-free). State feedback (locked
+## vs available vs affordable vs purchased) comes from which texture and
+## modulate_color _tile_style() gets, not from a hand-picked border colour
+## on a flat StyleBoxFlat any more.
 func _refresh_nodes() -> void:
 	for id in _node_buttons:
-		var btn: TreeNodeButton = _node_buttons[id]
+		var btn: Button = _node_buttons[id]
 		var node_data: Dictionary = GameData.UPGRADE_TREE[id]
 		var auto_owned: bool = node_data.get("auto_owned", false)
 		var node_state: String = "purchased" if auto_owned else GameState.get_tree_node_state(id)
 		var locked: bool = node_state == "coming-soon"
-		btn.text = "" if locked else node_data.get("icon", "")
-		btn.draw_lock = locked
 
-		var bg: Color = COL_STONE
-		var border: Color = COL_BORDER
-		var border_w := 2
+		var tex: Texture2D = NODE_FRAME_TEX
+		var modulate := Color.WHITE
 		var font_color: Color = COL_TEXT
-		var glow := false
-		match node_state:
-			"purchased":
-				bg = COL_STONE_LIGHT
-				border = COL_GOLD
-				font_color = COL_GOLD
-			"available":
-				var affordable: bool = GameState.get_available_ko() >= node_data.get("cost", 0)
-				if affordable:
-					bg = COL_STONE_LIGHT
-					border = COL_GOLD_DIM
-					font_color = COL_TEXT
-				else:
-					bg = COL_STONE
-					border = COL_BORDER
-					font_color = COL_TEXT_DIM
-			"coming-soon":
-				bg = COL_LOCKED_BG
-				border = COL_BORDER
-				border_w = 1
-				font_color = COL_TEXT_DIM
-			_:
-				bg = COL_STONE
-				border = COL_BORDER
-				font_color = COL_TEXT_DIM
-		# Always-owned root ("core") keeps the strongest treatment — the
-		# violet glow the reference gives its own centre node — regardless
-		# of the state switch above (auto_owned is never "coming-soon").
+		var icon_text: String = node_data.get("icon", "")
+
 		if auto_owned:
-			bg = COL_STONE_LIGHT
-			border = COL_PURPLE
-			border_w = 3
+			tex = NODE_CORE_TEX
+			icon_text = ""
 			font_color = COL_PURPLE
-			glow = true
-		elif id == _selected_id:
-			# Subtler highlight for whichever node the inspector is
-			# currently showing — distinct from the root's permanent glow.
-			border = Color(0.85, 0.82, 0.90, 1.0)
-			border_w = 3
-		_apply_button_style(btn, _stone_style(bg, border, border_w, 6, glow), font_color, 26)
-		btn.lock_color = font_color
-		btn.queue_redraw()
+		elif locked:
+			tex = NODE_LOCKED_TEX
+			icon_text = ""
+			font_color = COL_TEXT_DIM
+		else:
+			match node_state:
+				"purchased":
+					modulate = Color(1.0, 0.88, 0.55, 1.0)
+					font_color = COL_GOLD
+				"available":
+					var affordable: bool = GameState.get_available_ko() >= node_data.get("cost", 0)
+					if affordable:
+						font_color = COL_TEXT
+					else:
+						modulate = Color(0.55, 0.55, 0.55, 1.0)
+						font_color = COL_TEXT_DIM
+				_:
+					modulate = Color(0.7, 0.7, 0.7, 1.0)
+					font_color = COL_TEXT_DIM
+
+		btn.text = icon_text
+		_apply_button_style(btn, _tile_style(tex, modulate), font_color, 26)
 
 # ---------------------------------------------------------------------------
 # Node selection & inspector
