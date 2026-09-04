@@ -73,11 +73,18 @@ func _process(delta: float) -> void:
 
 ## Reference art (assets/houses/) provided directly, one per roof colour,
 ## intact and damaged — see HouseSprite's own header for why both states
-## are real sprites crossfaded together instead of the procedural drawing
-## every other village element uses. "wall" stays in each def below only
-## because it still feeds HouseSprite's rubble-pile colours after
-## collapse; it no longer has any visual effect on the house itself,
-## which is baked into the sprites.
+## are real sprites instead of the procedural drawing every other village
+## element uses, and for the collapse sequence that plays between them.
+## "wall" stays in each def below only because it still feeds the wall/
+## facade splinter colours the collapse sequence spawns; it no longer has
+## any visual effect on the house itself, which is baked into the sprites.
+##
+## "tier" is the collapse sequence's size_tier (see HouseSprite): the 5
+## houses are only 3 distinct shapes (red/green share one, blue/purple
+## share one), so tier tracks the shape, not the colour — small red/green
+## get a quick partial roof collapse, the taller gold house adds facade
+## pieces, the large blue/purple houses get the biggest, most staggered
+## collapse plus a faint shake.
 const HOUSE_TEXTURES := {
 	"roofRed": preload("res://assets/houses/house_red.png"),
 	"roofGold": preload("res://assets/houses/house_gold.png"),
@@ -95,11 +102,11 @@ const HOUSE_TEXTURES_DAMAGED := {
 
 func _add_houses(gx: Callable, gy: Callable, u: float) -> void:
 	var defs := [
-		{"fx": 0.05, "fy": 0.22, "scale": 1.00, "roof": "roofRed", "wall": "wallCream"},
-		{"fx": 0.235, "fy": 0.16, "scale": 0.94, "roof": "roofGold", "wall": "wallSlate"},
-		{"fx": 0.335, "fy": 0.30, "scale": 0.90, "roof": "roofGreen", "wall": "wallSlate"},
-		{"fx": 0.605, "fy": 0.24, "scale": 1.06, "roof": "roofPurple", "wall": "wallRose"},
-		{"fx": 0.775, "fy": 0.17, "scale": 0.96, "roof": "roofBlue", "wall": "wallCream"},
+		{"fx": 0.05, "fy": 0.22, "scale": 1.00, "roof": "roofRed", "wall": "wallCream", "tier": 0},
+		{"fx": 0.235, "fy": 0.16, "scale": 0.94, "roof": "roofGold", "wall": "wallSlate", "tier": 1},
+		{"fx": 0.335, "fy": 0.30, "scale": 0.90, "roof": "roofGreen", "wall": "wallSlate", "tier": 0},
+		{"fx": 0.605, "fy": 0.24, "scale": 1.06, "roof": "roofPurple", "wall": "wallRose", "tier": 2},
+		{"fx": 0.775, "fy": 0.17, "scale": 0.96, "roof": "roofBlue", "wall": "wallCream", "tier": 2},
 	]
 	for i in range(defs.size()):
 		var d = defs[i]
@@ -109,7 +116,7 @@ func _add_houses(gx: Callable, gy: Callable, u: float) -> void:
 			u * 0.325 * d["scale"], HOUSE_TEXTURES[d["roof"]], HOUSE_TEXTURES_DAMAGED[d["roof"]],
 			Palette.c(d["wall"]), Palette.c(d["wall"] + "Shadow"),
 			Palette.c(d["roof"]), Palette.c(d["roof"] + "Shadow"),
-			0.75 + _seeded(i * 9.1) * 0.6, i * 4.1 + 3.0, _wind, entities,
+			0.75 + _seeded(i * 9.1) * 0.6, i * 4.1 + 3.0, _wind, entities, d["tier"],
 		)
 		entities.add_child(house)
 
