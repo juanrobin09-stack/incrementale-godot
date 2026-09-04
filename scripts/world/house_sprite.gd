@@ -97,6 +97,14 @@ extends PixelDrawer
 ## resilience / no-respawn / no-recovery-from-collapse behaviour is
 ## unchanged — see tree_sprite.gd's own header for the "no respawn"
 ## product decision this follows.
+##
+## Optional rotating overlay (setup_rotating_overlay): a second texture,
+## unset by default, spun continuously around a fixed local point and
+## drawn on top of the composite — added for the windmill's sails once
+## it started reusing this exact class (world_scene.gd's _add_windmill)
+## rather than staying its own independent system. No house ever calls
+## it, so this is a pure addition, not a behaviour change — see the
+## field's own comment further down for the mechanism.
 
 const GRID_COLS := 5
 const GRID_ROWS := 6
@@ -142,6 +150,29 @@ var _fine_reserved: Array = []
 var _reserved_cells: Array = []
 var _reserved_lookup: Dictionary = {}
 var _reserved_weathered: Array = []
+
+## Optional secondary texture, rotated continuously around a fixed local
+## point and drawn on top of the composite — added for the windmill's
+## sails (a real rotating part, unlike anything a house has) without
+## turning this into a windmill-specific class or an independent system:
+## unset by default (null), so the 5 houses — which never call
+## setup_rotating_overlay() — are byte-for-byte unaffected; _draw() and
+## _update_stress() below each gain one extra branch neither ever
+## exercises. Speed table/multiplier are supplied by the caller rather
+## than hardcoded here, same reasoning: rotation SPEED tuning is the
+## windmill's own concern, this class only knows how to spin and draw
+## whatever texture it's handed, using the wind reference it already
+## reads for its own stress. Angle only advances while _update_stress()
+## itself runs (the "intact" phase — see _process()'s match), so it
+## freezes automatically once collapse starts, no extra state check
+## needed: a broken windmill's sails stop rather than spinning forever
+## through the collapse/ruined sequence.
+var _overlay_texture_intact: Texture2D
+var _overlay_texture_damaged: Texture2D
+var _overlay_hub_frac: Vector2 = Vector2.ZERO
+var _overlay_speed_by_level: Array = []
+var _overlay_force_mul: float = 0.0
+var _overlay_angle: float = 0.0
 
 # "intact" | "collapsing" | "ruined" — see header.
 var _state: String = "intact"
@@ -210,6 +241,20 @@ func setup(p_h: float, p_texture: Texture2D, p_texture_damaged: Texture2D, p_wal
 			_fine_reserved[fy * _fine_cols + fx] = _reserved_lookup.has(macro_row * GRID_COLS + macro_col)
 
 	queue_redraw()
+
+## p_hub_frac: the overlay's own rotation centre, as a fraction (0-1) of
+## its texture's width/height — resolution-independent, since it has to
+## line up with this sprite's own _w x h destination rect regardless of
+## the house/windmill's size. p_speed_by_level/p_force_mul feed the same
+## "base speed for this wind level, plus force times a multiplier" shape
+## every other wind-reactive rate in this game already uses; pass the
+## windmill's own tuned numbers, not house-related ones.
+func setup_rotating_overlay(p_texture_intact: Texture2D, p_texture_damaged: Texture2D, p_hub_frac: Vector2, p_speed_by_level: Array, p_force_mul: float) -> void:
+	_overlay_texture_intact = p_texture_intact
+	_overlay_texture_damaged = p_texture_damaged
+	_overlay_hub_frac = p_hub_frac
+	_overlay_speed_by_level = p_speed_by_level
+	_overlay_force_mul = p_force_mul
 
 ## The intact and damaged reference art are two independently-drawn
 ## images, not a traced pair — confirmed on the red house: 465x534 vs
@@ -488,6 +533,11 @@ func _update_stress(delta: float) -> void:
 	_stress = clamp(_stress, 0.0, 1.0)
 
 	var dir: float = wind.direction if wind.direction != 0.0 else 1.0
+
+	if _overlay_texture_intact != null:
+		var overlay_base_speed: float = _overlay_speed_by_level[wind_level] if wind_level < _overlay_speed_by_level.size() else 0.0
+		_overlay_angle += (overlay_base_speed + wind.force * _overlay_force_mul) * delta * dir
+
 	var wall_h: float = h * 0.42
 	var crack_t: float = clamp((_stress - 0.40) / 0.35, 0.0, 1.0)
 
@@ -625,3 +675,9 @@ func _finish_collapse() -> void:
 func _draw() -> void:
 	var ox: float = _seq_shake_x if _state == "collapsing" else 0.0
 	draw_texture_rect(_composite_texture, Rect2(-_w / 2.0 + ox, -h, _w, h), false)
+	if _overlay_texture_intact != null:
+		var overlay_tex: Texture2D = _overlay_texture_damaged if (_overlay_texture_damaged != null and _stress >= 0.5) else _overlay_texture_intact
+		var hub_local: Vector2 = Vector2(-_w / 2.0 + ox + _overlay_hub_frac.x * _w, -h + _overlay_hub_frac.y * h)
+		draw_set_transform(hub_local, _overlay_angle)
+		draw_texture_rect(overlay_tex, Rect2(-_overlay_hub_frac.x * _w, -_overlay_hub_frac.y * h, _w, h), false)
+		draw_set_transform(Vector2.ZERO, 0.0)
