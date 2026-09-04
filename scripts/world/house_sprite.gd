@@ -60,6 +60,11 @@ extends PixelDrawer
 ##    saturates well before real structural failure and the whole
 ##    texture is already fully eroded by the time collapse would
 ##    trigger, leaving nothing left to visibly tear away for stage 2.
+##    Once crack_t is nearly saturated anyway, those reserved cells each
+##    get one subtle weathering tint (_weather_reserved_cell) so they
+##    read as grimy rather than sitting there pristine — reported as a
+##    "brand new, too vivid" patch on an otherwise cracked house if the
+##    wind plateaus below COLLAPSE_TRIGGER for a while.
 ## 2. "collapsing" — triggered once at COLLAPSE_TRIGGER stress, a
 ##    one-shot ~1.5-2.3s timed sequence (mirrors tree_sprite.gd's
 ##    falling state: not reversible, not re-entered). The reserved macro
@@ -77,14 +82,17 @@ extends PixelDrawer
 ##    with size_tier (small/medium/large — set per house shape in
 ##    world_scene.gd, since the 5 houses are really only 3 distinct
 ##    shapes: red/green share one, gold is one, blue/purple share one).
-## 3. "ruined" — the sequence's terminal state. _draw() switches to
-##    drawing texture_damaged directly, whole-image, instead of the
-##    composite — guarantees the sprite ends up pixel-identical to the
-##    provided ruin art, not a fully-eroded approximation of it.
-##    Permanent, no further per-frame work — matches tree_sprite.gd's
-##    "fallen" being inert for good. The old procedural rubble-pile draw
-##    is retired: it existed only because no ruin reference art existed
-##    yet, and now texture_damaged IS that reference art.
+## 3. "ruined" — the sequence's terminal state. By now every cell (fine
+##    and reserved-macro alike) has been blitted at least once, so the
+##    composite already IS, in effect, the fully-revealed damaged art —
+##    _draw() just keeps showing it rather than switching to the raw
+##    texture_damaged (see _draw()'s own header for why that switch used
+##    to reintroduce the exact apparent-size mismatch the alignment fix
+##    exists to prevent). Permanent, no further per-frame work — matches
+##    tree_sprite.gd's "fallen" being inert for good. The old procedural
+##    rubble-pile draw is retired: it existed only because no ruin
+##    reference art existed yet, and now texture_damaged IS that
+##    reference art (by way of the aligned composite, not the raw file).
 ##
 ## resilience / no-respawn / no-recovery-from-collapse behaviour is
 ## unchanged — see tree_sprite.gd's own header for the "no respawn"
@@ -124,6 +132,7 @@ var _fine_reserved: Array = []
 
 var _reserved_cells: Array = []
 var _reserved_lookup: Dictionary = {}
+var _reserved_weathered: Array = []
 
 # "intact" | "collapsing" | "ruined" — see header.
 var _state: String = "intact"
@@ -181,6 +190,8 @@ func setup(p_h: float, p_texture: Texture2D, p_texture_damaged: Texture2D, p_wal
 	_reserved_lookup = {}
 	for cell in _reserved_cells:
 		_reserved_lookup[cell.y * GRID_COLS + cell.x] = true
+	_reserved_weathered.resize(_reserved_cells.size())
+	_reserved_weathered.fill(false)
 
 	_fine_reserved.resize(_fine_cols * _fine_rows)
 	for fy in range(_fine_rows):
@@ -195,25 +206,33 @@ func setup(p_h: float, p_texture: Texture2D, p_texture_damaged: Texture2D, p_wal
 ## images, not a traced pair — confirmed on the red house: 465x534 vs
 ## 263x252, a visibly different aspect ratio, AND (checked directly by
 ## rendering a partial reveal in isolation) a different internal roof/
-## wall proportion even accounting for that: the opacity-weighted
-## vertical centroid sits at 66% of frame height in intact vs 58% in
-## damaged. A naive stretch-to-intact's-raw-dimensions lines up their
-## outer frames but not their actual content, so revealing a cell near a
-## silhouette edge (typically the roofline) either erases real roof
-## (fixed by blend_rect in _blit_cell) or pastes in a chunk of damaged's
-## roof sitting where intact has open sky — a visible false "hole" or
-## misplaced patch either way, reproduced by simulating the naive
-## version in isolation before this fix existed.
+## wall proportion even accounting for that. A naive stretch-to-intact's-
+## raw-dimensions lines up their outer frames but not their actual
+## content, so revealing a cell near a silhouette edge (typically the
+## roofline) either erases real roof (fixed by blend_rect in _blit_cell)
+## or pastes in a chunk of damaged's roof sitting where intact has open
+## sky — a visible false "hole" or misplaced patch either way, reproduced
+## by simulating the naive version in isolation before this fix existed.
 ##
-## Fixed by aligning on each image's own opacity-weighted centroid and
-## spread (mean + standard deviation) per axis instead of raw image
-## bounds — a statistical stand-in for "where's the visual mass, and how
-## spread out is it" that needs no manual per-house tuning or hand-picked
-## landmark points, and correctly handles both images already being
-## tightly cropped to their own content (so their raw bounding boxes
-## nearly coincide already) while still disagreeing on where the DENSE
-## part of that content sits within it. Validated in isolation across
-## all 3 house shapes (red/green, gold, blue/purple) before porting here.
+## A first correction aligned on each image's own opacity-weighted
+## centroid and spread (mean + std-dev) per axis instead of raw image
+## bounds. That fixed the hole/misplaced-patch problem but not a
+## related one: the ruined house rendering visibly BIGGER than the
+## intact one (reported on the gold house). Root cause — a thin, tall
+## chimney reaching toward the top of frame barely adds mass, but it
+## still drags the statistical spread up enough that matching spreads
+## does not guarantee the SOLID, recognizable body of the house (walls +
+## main roof) ends up the same apparent size; confirmed by comparing the
+## aligned image's own recomputed centroid/spread against intact's (they
+## matched almost exactly) while the rendered house still looked bigger.
+##
+## Fixed by aligning on each image's "core" bounding box instead — rows/
+## columns whose opacity mass is at least 30% of that axis's densest
+## row/column (see _core_bbox), which excludes thin sparse extensions
+## like a lone chimney column and leaves just the dense body. No manual
+## per-house tuning either. Validated by rendering full-size side-by-side
+## comparisons AND re-running the hole-detection check across all 3
+## house shapes (red/green, gold, blue/purple) before porting here.
 ##
 ## Implemented as crop/pad + one resize (both native Image ops), not a
 ## per-pixel remap loop — setup() reruns on every window resize (see
@@ -221,26 +240,27 @@ func setup(p_h: float, p_texture: Texture2D, p_texture_damaged: Texture2D, p_wal
 ## image sizes (up to ~430k pixels) would be a real hitch, repeated on
 ## every resize.
 func _align_damaged_to_intact(intact_img: Image, damaged_img: Image, out_w: int, out_h: int) -> Image:
-	var i_stats: Vector4 = _opacity_stats(intact_img)
-	var d_stats: Vector4 = _opacity_stats(damaged_img)
+	var i_box: Vector4 = _core_bbox(intact_img)
+	var d_box: Vector4 = _core_bbox(damaged_img)
 	var dw: int = damaged_img.get_width()
 	var dh: int = damaged_img.get_height()
 
-	var icx: float = i_stats.x * out_w
-	var icy: float = i_stats.y * out_h
-	var isx: float = max(1.0, i_stats.z * out_w)
-	var isy: float = max(1.0, i_stats.w * out_h)
-	var dcx: float = d_stats.x * dw
-	var dcy: float = d_stats.y * dh
-	var dsx: float = max(1.0, d_stats.z * dw)
-	var dsy: float = max(1.0, d_stats.w * dh)
+	var ix0: float = i_box.x * out_w
+	var iy0: float = i_box.y * out_h
+	var iw_core: float = max(1.0, (i_box.z - i_box.x) * out_w)
+	var ih_core: float = max(1.0, (i_box.w - i_box.y) * out_h)
+	var dx0: float = d_box.x * dw
+	var dy0: float = d_box.y * dh
+	var dw_core: float = max(1.0, (d_box.z - d_box.x) * dw)
+	var dh_core: float = max(1.0, (d_box.w - d_box.y) * dh)
 
 	# The rectangle, in damaged's own native pixel space, that maps onto
-	# intact's full out_w x out_h frame under a mean+scale affine per axis.
-	var scale_x: float = dsx / isx
-	var scale_y: float = dsy / isy
-	var src_x0: float = dcx - icx * scale_x
-	var src_y0: float = dcy - icy * scale_y
+	# intact's full out_w x out_h frame so the two CORE boxes (not the
+	# raw frames) end up the same size/position.
+	var scale_x: float = dw_core / iw_core
+	var scale_y: float = dh_core / ih_core
+	var src_x0: float = dx0 - ix0 * scale_x
+	var src_y0: float = dy0 - iy0 * scale_y
 	var src_w: float = float(out_w) * scale_x
 	var src_h: float = float(out_h) * scale_y
 
@@ -268,16 +288,25 @@ func _align_damaged_to_intact(intact_img: Image, damaged_img: Image, out_w: int,
 	intermediate.resize(out_w, out_h, Image.INTERPOLATE_NEAREST)
 	return intermediate
 
-## Opacity-weighted centroid and spread (std-dev), as FRACTIONS of width/
-## height (Vector4(cx, cy, sx, sy), each 0-1) so the caller can scale to
-## either image's own native size. Computed on a small (96x96)
-## downsampled proxy rather than the full image — checked in isolation
-## that this tracks the full-resolution statistic within ~0.01 across
-## all 3 house shapes, while keeping this a few thousand cheap GDScript-
-## side pixel reads instead of up to several hundred thousand per image
-## — matters since this runs once per house at setup(), on every resize.
-func _opacity_stats(img: Image) -> Vector4:
+## Bounding box of the SUBSTANTIAL part of the silhouette — rows/columns
+## whose total opacity mass is at least THRESH_FRAC of that axis's
+## densest row/column — as fractions of width/height (Vector4(x0, y0,
+## x1, y1), each 0-1). Computed on a small (96x96) downsampled proxy for
+## the same performance reason as before this replaced a centroid/spread
+## statistic here (see _align_damaged_to_intact's header): setup()
+## reruns on every window resize, and a full-resolution per-pixel pass
+## at these image sizes (up to ~430k pixels) would be a real hitch.
+##
+## Deliberately thresholded, not the raw opaque-pixel bounding box
+## (every pixel, no threshold) — a first pass tried exactly that and
+## found both images' raw bboxes already spanned ~100% of their own
+## frames, i.e. no correction available from it at all. Thresholding out
+## rows/columns that are mostly empty (a lone chimney column reaching
+## toward the top of frame, contributing almost no mass to an otherwise-
+## empty row) leaves just the dense, recognizable body of the house.
+func _core_bbox(img: Image) -> Vector4:
 	const PROXY := 96
+	const THRESH_FRAC := 0.3
 	var proxy: Image = img.duplicate()
 	proxy.resize(PROXY, PROXY, Image.INTERPOLATE_BILINEAR)
 
@@ -292,29 +321,28 @@ func _opacity_stats(img: Image) -> Vector4:
 				col_mass[x] += a
 				row_mass[y] += a
 
-	var total: float = 0.0
-	for x in range(PROXY):
-		total += col_mass[x]
-	if total <= 0.0:
-		return Vector4(0.5, 0.5, 0.25, 0.25)
+	var col_peak: float = 0.0
+	var row_peak: float = 0.0
+	for i in range(PROXY):
+		col_peak = max(col_peak, col_mass[i])
+		row_peak = max(row_peak, row_mass[i])
+	if col_peak <= 0.0 or row_peak <= 0.0:
+		return Vector4(0.0, 0.0, 1.0, 1.0)
 
-	var cx: float = 0.0
-	for x in range(PROXY):
-		cx += float(x) * col_mass[x]
-	cx /= total
-	var cy: float = 0.0
-	for y in range(PROXY):
-		cy += float(y) * row_mass[y]
-	cy /= total
-	var vx: float = 0.0
-	for x in range(PROXY):
-		vx += (float(x) - cx) * (float(x) - cx) * col_mass[x]
-	vx /= total
-	var vy: float = 0.0
-	for y in range(PROXY):
-		vy += (float(y) - cy) * (float(y) - cy) * row_mass[y]
-	vy /= total
-	return Vector4(cx / PROXY, cy / PROXY, sqrt(vx) / PROXY, sqrt(vy) / PROXY)
+	var x0: int = 0
+	while x0 < PROXY and col_mass[x0] < THRESH_FRAC * col_peak:
+		x0 += 1
+	var x1: int = PROXY - 1
+	while x1 > x0 and col_mass[x1] < THRESH_FRAC * col_peak:
+		x1 -= 1
+	var y0: int = 0
+	while y0 < PROXY and row_mass[y0] < THRESH_FRAC * row_peak:
+		y0 += 1
+	var y1: int = PROXY - 1
+	while y1 > y0 and row_mass[y1] < THRESH_FRAC * row_peak:
+		y1 -= 1
+
+	return Vector4(float(x0) / PROXY, float(y0) / PROXY, float(x1 + 1) / PROXY, float(y1 + 1) / PROXY)
 
 ## Deterministic per-cell reveal point in [0,1] for a macro cell — a row
 ## bias (0 at the roof, rising toward the base) plus per-cell jitter from
@@ -388,6 +416,34 @@ func _blit_macro_cell(col: int, row: int) -> void:
 	var y1: int = int(round(float(row + 1) * th / GRID_ROWS))
 	_blit_cell(x0, y0, x1, y1)
 
+## Reserved macro cells (see header) are deliberately never touched by
+## the continuous dissolve above, so there's still real material left to
+## tear away once collapse triggers — but if wind plateaus for a while
+## before reaching COLLAPSE_TRIGGER, that left them showing 100% pristine
+## intact pixels while everything else had already cracked, reading as a
+## brand new, oddly vivid patch dropped onto an otherwise weathered
+## house (reported directly). Once the tremor is nearly done anyway
+## (cracks saturate at crack_t=1, stress 0.75 — this fires a bit before
+## that), each reserved cell gets ONE subtle dark tint blended over it —
+## enough to read as grime/weathering, not enough to look like the
+## actual damaged texture, so there's still a real chunk left for the
+## collapse sequence to tear off and reveal cleanly.
+func _weather_reserved_cell(cell: Vector2i) -> void:
+	var tw: int = _composite_img.get_width()
+	var th: int = _composite_img.get_height()
+	var x0: int = int(round(float(cell.x) * tw / GRID_COLS))
+	var x1: int = int(round(float(cell.x + 1) * tw / GRID_COLS))
+	var y0: int = int(round(float(cell.y) * th / GRID_ROWS))
+	var y1: int = int(round(float(cell.y + 1) * th / GRID_ROWS))
+	var tint_w: int = max(1, x1 - x0)
+	var tint_h: int = max(1, y1 - y0)
+	var tint_img: Image = _composite_img.duplicate()
+	tint_img.resize(tint_w, tint_h, Image.INTERPOLATE_NEAREST)
+	var grime: Color = Palette.c("rubbleWoodDark")
+	tint_img.fill(Color(grime.r, grime.g, grime.b, 0.22))
+	_composite_img.blend_rect(tint_img, Rect2i(0, 0, tint_w, tint_h), Vector2i(x0, y0))
+	_composite_dirty = true
+
 func _process(delta: float) -> void:
 	match _state:
 		"intact":
@@ -419,6 +475,12 @@ func _update_stress(delta: float) -> void:
 				if not _fine_revealed[idx] and not _fine_reserved[idx] and crack_t >= _fine_threshold(fx, fy):
 					_fine_revealed[idx] = true
 					_blit_fine_cell(fx, fy)
+
+	if crack_t >= 0.88:
+		for i in range(_reserved_cells.size()):
+			if not _reserved_weathered[i]:
+				_reserved_weathered[i] = true
+				_weather_reserved_cell(_reserved_cells[i])
 
 	if _last_stress < 0.65 and _stress >= 0.65:
 		DebrisSpawner.burst(entities_parent, position.x + _w * 0.25, position.y - wall_h,
@@ -517,11 +579,26 @@ func _finish_collapse() -> void:
 	DebrisSpawner.dust(entities_parent, position.x, position.y - wall_h * 0.15, 3.0, _w * 0.5, 1.3)
 	queue_redraw()
 
+## Always the composite, "ruined" included — a first pass drew the RAW
+## texture_damaged for "ruined" specifically, to guarantee the sprite
+## ends on the exact provided ruin art. But that bypassed the alignment
+## fix above: texture_damaged's own aspect ratio still differs from
+## intact's, so draw_texture_rect force-stretching it into _w x h on its
+## own reintroduced the same apparent-size mismatch the alignment fix
+## exists to prevent (the ruined house rendering bigger than the intact
+## one) — just for the terminal frame instead of the transition. By the
+## time _state reaches "ruined", every fine cell (revealed once crack_t
+## saturates, always before COLLAPSE_TRIGGER) and every reserved macro
+## cell (all blitted during "collapsing", scheduled to fire well before
+## it ends) has received the aligned damaged image via _blit_cell, with
+## no gaps — consecutive cells share exact pixel boundaries, see
+## _blit_fine_cell/_blit_macro_cell's rounding — so the composite is
+## already, in effect, the fully-revealed damaged art, correctly sized.
+## The visual reference brief explicitly allows this: "if it's better
+## not to use the ruin PNG directly as the final sprite, you can use it
+## as a reference to reconstruct the final state from the same elements,
+## as long as the result visually matches the provided ruin" — this is
+## exactly that reconstruction, not a departure from it.
 func _draw() -> void:
-	match _state:
-		"ruined":
-			draw_texture_rect(texture_damaged, Rect2(-_w / 2.0, -h, _w, h), false)
-		"collapsing":
-			draw_texture_rect(_composite_texture, Rect2(-_w / 2.0 + _seq_shake_x, -h, _w, h), false)
-		_:
-			draw_texture_rect(_composite_texture, Rect2(-_w / 2.0, -h, _w, h), false)
+	var ox: float = _seq_shake_x if _state == "collapsing" else 0.0
+	draw_texture_rect(_composite_texture, Rect2(-_w / 2.0 + ox, -h, _w, h), false)

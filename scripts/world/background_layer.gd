@@ -139,16 +139,6 @@ func _build_ground_texture() -> void:
 			"w": 1.0 + seeded(s + 3.0), "h": 1.0, "color": color,
 		})
 
-	var flower_accent: Color = Palette.c("flowerAccent")
-	var flower_glow: Color = Palette.c("windowGlow")
-	var flower_n: int = int(round(area / 1400.0))
-	for i in range(flower_n):
-		var s: float = i * 8.3 + 300.0
-		var color: Color = flower_glow if seeded(s + 1.0) > 0.5 else flower_accent
-		_ground_texture.append({
-			"x": seeded(s) * logical_w, "y": seeded(s + 2.0) * ground_h,
-			"w": 1.0, "h": 1.0, "color": color,
-		})
 
 ## Sparse worn/pebble detail scattered across the road's own area —
 ## positions stored relative to (road_x - road_w/2, ground_top) so they
@@ -313,8 +303,12 @@ func _draw_ground(storm_shade: float) -> void:
 ## a place" tell once the houses became real reference art.
 func _road_edge_offset(y: float, side_seed: float) -> float:
 	var t: float = y / max(1.0, ground_h)
-	var wave: float = sin(t * 11.0 + side_seed) * 0.6 + sin(t * 4.1 + side_seed * 1.7 + 1.3) * 0.4
-	return wave * road_w * 0.07
+	# A single low frequency (under half a cycle across the visible road)
+	# at a small amplitude — a first pass summed two faster sines and
+	# read as a kinked/broken line rather than a road, not the gentle
+	# meander it was going for.
+	var wave: float = sin(t * 2.2 + side_seed)
+	return wave * road_w * 0.045
 
 func _draw_road() -> void:
 	var h: float = ground_h
