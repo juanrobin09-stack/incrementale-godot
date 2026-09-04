@@ -152,10 +152,10 @@ func setup(p_h: float, p_texture: Texture2D, p_texture_damaged: Texture2D, p_wal
 	var tex_h: int = intact_img.get_height()
 	_w = h * (float(tex_w) / float(tex_h) if tex_h > 0 else 1.0)
 
-	_damaged_resized = texture_damaged.get_image()
-	if _damaged_resized.get_format() != intact_img.get_format():
-		_damaged_resized.convert(intact_img.get_format())
-	_damaged_resized.resize(tex_w, tex_h, Image.INTERPOLATE_NEAREST)
+	var damaged_native: Image = texture_damaged.get_image()
+	if damaged_native.get_format() != intact_img.get_format():
+		damaged_native.convert(intact_img.get_format())
+	_damaged_resized = _align_damaged_to_intact(intact_img, damaged_native, tex_w, tex_h)
 
 	_composite_img = intact_img.duplicate()
 	_composite_texture = ImageTexture.create_from_image(_composite_img)
@@ -190,6 +190,131 @@ func setup(p_h: float, p_texture: Texture2D, p_texture_damaged: Texture2D, p_wal
 			_fine_reserved[fy * _fine_cols + fx] = _reserved_lookup.has(macro_row * GRID_COLS + macro_col)
 
 	queue_redraw()
+
+## The intact and damaged reference art are two independently-drawn
+## images, not a traced pair — confirmed on the red house: 465x534 vs
+## 263x252, a visibly different aspect ratio, AND (checked directly by
+## rendering a partial reveal in isolation) a different internal roof/
+## wall proportion even accounting for that: the opacity-weighted
+## vertical centroid sits at 66% of frame height in intact vs 58% in
+## damaged. A naive stretch-to-intact's-raw-dimensions lines up their
+## outer frames but not their actual content, so revealing a cell near a
+## silhouette edge (typically the roofline) either erases real roof
+## (fixed by blend_rect in _blit_cell) or pastes in a chunk of damaged's
+## roof sitting where intact has open sky — a visible false "hole" or
+## misplaced patch either way, reproduced by simulating the naive
+## version in isolation before this fix existed.
+##
+## Fixed by aligning on each image's own opacity-weighted centroid and
+## spread (mean + standard deviation) per axis instead of raw image
+## bounds — a statistical stand-in for "where's the visual mass, and how
+## spread out is it" that needs no manual per-house tuning or hand-picked
+## landmark points, and correctly handles both images already being
+## tightly cropped to their own content (so their raw bounding boxes
+## nearly coincide already) while still disagreeing on where the DENSE
+## part of that content sits within it. Validated in isolation across
+## all 3 house shapes (red/green, gold, blue/purple) before porting here.
+##
+## Implemented as crop/pad + one resize (both native Image ops), not a
+## per-pixel remap loop — setup() reruns on every window resize (see
+## world_scene.gd's build()), and a GDScript-side per-pixel pass at these
+## image sizes (up to ~430k pixels) would be a real hitch, repeated on
+## every resize.
+func _align_damaged_to_intact(intact_img: Image, damaged_img: Image, out_w: int, out_h: int) -> Image:
+	var i_stats: Vector4 = _opacity_stats(intact_img)
+	var d_stats: Vector4 = _opacity_stats(damaged_img)
+	var dw: int = damaged_img.get_width()
+	var dh: int = damaged_img.get_height()
+
+	var icx: float = i_stats.x * out_w
+	var icy: float = i_stats.y * out_h
+	var isx: float = max(1.0, i_stats.z * out_w)
+	var isy: float = max(1.0, i_stats.w * out_h)
+	var dcx: float = d_stats.x * dw
+	var dcy: float = d_stats.y * dh
+	var dsx: float = max(1.0, d_stats.z * dw)
+	var dsy: float = max(1.0, d_stats.w * dh)
+
+	# The rectangle, in damaged's own native pixel space, that maps onto
+	# intact's full out_w x out_h frame under a mean+scale affine per axis.
+	var scale_x: float = dsx / isx
+	var scale_y: float = dsy / isy
+	var src_x0: float = dcx - icx * scale_x
+	var src_y0: float = dcy - icy * scale_y
+	var src_w: float = float(out_w) * scale_x
+	var src_h: float = float(out_h) * scale_y
+
+	# Build that rectangle as an actual image (blank canvas + the part of
+	# damaged_img that falls inside it, wherever that overlap lands —
+	# which can be a strict subset if the rectangle extends past
+	# damaged's own edges), then resize the whole thing to out_w x out_h.
+	var interm_w: int = max(1, int(round(src_w)))
+	var interm_h: int = max(1, int(round(src_h)))
+	var intermediate: Image = damaged_img.duplicate()
+	intermediate.resize(interm_w, interm_h, Image.INTERPOLATE_NEAREST)
+	intermediate.fill(Color(0.0, 0.0, 0.0, 0.0))
+
+	var offset_x: int = int(round(-src_x0))
+	var offset_y: int = int(round(-src_y0))
+	var src_x0i: int = max(0, -offset_x)
+	var src_y0i: int = max(0, -offset_y)
+	var src_x1i: int = min(dw, interm_w - offset_x)
+	var src_y1i: int = min(dh, interm_h - offset_y)
+	if src_x1i > src_x0i and src_y1i > src_y0i:
+		var dst_x: int = max(0, offset_x)
+		var dst_y: int = max(0, offset_y)
+		intermediate.blit_rect(damaged_img, Rect2i(src_x0i, src_y0i, src_x1i - src_x0i, src_y1i - src_y0i), Vector2i(dst_x, dst_y))
+
+	intermediate.resize(out_w, out_h, Image.INTERPOLATE_NEAREST)
+	return intermediate
+
+## Opacity-weighted centroid and spread (std-dev), as FRACTIONS of width/
+## height (Vector4(cx, cy, sx, sy), each 0-1) so the caller can scale to
+## either image's own native size. Computed on a small (96x96)
+## downsampled proxy rather than the full image — checked in isolation
+## that this tracks the full-resolution statistic within ~0.01 across
+## all 3 house shapes, while keeping this a few thousand cheap GDScript-
+## side pixel reads instead of up to several hundred thousand per image
+## — matters since this runs once per house at setup(), on every resize.
+func _opacity_stats(img: Image) -> Vector4:
+	const PROXY := 96
+	var proxy: Image = img.duplicate()
+	proxy.resize(PROXY, PROXY, Image.INTERPOLATE_BILINEAR)
+
+	var col_mass: PackedFloat64Array = PackedFloat64Array()
+	col_mass.resize(PROXY)
+	var row_mass: PackedFloat64Array = PackedFloat64Array()
+	row_mass.resize(PROXY)
+	for y in range(PROXY):
+		for x in range(PROXY):
+			var a: float = proxy.get_pixel(x, y).a
+			if a > 0.04:
+				col_mass[x] += a
+				row_mass[y] += a
+
+	var total: float = 0.0
+	for x in range(PROXY):
+		total += col_mass[x]
+	if total <= 0.0:
+		return Vector4(0.5, 0.5, 0.25, 0.25)
+
+	var cx: float = 0.0
+	for x in range(PROXY):
+		cx += float(x) * col_mass[x]
+	cx /= total
+	var cy: float = 0.0
+	for y in range(PROXY):
+		cy += float(y) * row_mass[y]
+	cy /= total
+	var vx: float = 0.0
+	for x in range(PROXY):
+		vx += (float(x) - cx) * (float(x) - cx) * col_mass[x]
+	vx /= total
+	var vy: float = 0.0
+	for y in range(PROXY):
+		vy += (float(y) - cy) * (float(y) - cy) * row_mass[y]
+	vy /= total
+	return Vector4(cx / PROXY, cy / PROXY, sqrt(vx) / PROXY, sqrt(vy) / PROXY)
 
 ## Deterministic per-cell reveal point in [0,1] for a macro cell — a row
 ## bias (0 at the roof, rising toward the base) plus per-cell jitter from
