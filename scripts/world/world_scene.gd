@@ -142,20 +142,13 @@ const HOUSE_TEXTURES_DAMAGED := {
 }
 const WINDMILL_TEXTURE := preload("res://assets/windmill/windmill.png")
 const WINDMILL_TEXTURE_DAMAGED := preload("res://assets/windmill/windmill_damaged.png")
-const WINDMILL_BLADES := preload("res://assets/windmill/windmill_blades.png")
-const WINDMILL_BLADES_DAMAGED := preload("res://assets/windmill/windmill_blades_damaged.png")
-## Fraction (0-1) of the blade textures' own width/height where the sails'
-## rotation centre sits — measured directly on the source art (hub pixel
-## (302,186) on the 565x565 canvas both windmill.png and
-## windmill_blades.png share), not eyeballed.
+## Fraction (0-1) of the tower texture's own width/height where the
+## sails' rotation centre sits — measured directly on the source art
+## (hub pixel (302,186) on the 565x565 canvas), not eyeballed. Used to
+## position windmill_blades_sprite.gd's child node; see its own header
+## for why the sails are procedural rather than a texture cut from this
+## same art.
 const WINDMILL_HUB_FRAC := Vector2(302.0 / 565.0, 186.0 / 565.0)
-## Same base-speed-per-wind-level table and force multiplier the
-## original procedural windmill_sprite.gd used for its blade angle, kept
-## identical so the rotation *feel* carries over even though the sails
-## are now real extracted art spun by HouseSprite's generic overlay
-## instead of procedural pxRect blades redrawn every frame.
-const WINDMILL_BLADE_SPEED_BY_LEVEL := [0.0, 1.4, 3.2, 6.0]
-const WINDMILL_BLADE_FORCE_MUL := 2.2
 
 ## Returns each house's exact destination rect (post-overlap-resolution)
 ## so _add_trees() can keep trees out of them — see the class header for
@@ -239,6 +232,13 @@ func _resolve_house_positions(defs: Array, sizes: Array, gx: Callable, gy: Calla
 ## special case. size_tier 2 (large): the tallest single structure in the
 ## village, its collapse should read at least as substantial as the
 ## blue/purple houses'.
+##
+## The rotating sails are a separate WindmillBladesSprite, added as an
+## actual child of `mill` (not a sibling in `entities`) so they always
+## draw right after the tower and inherit its y-sort position instead of
+## being sorted independently by their own much-higher (near the roof)
+## y — see that script's own header for why they're procedural rather
+## than cut from this same reference art.
 func _add_windmill(gx: Callable, gy: Callable, u: float) -> Rect2:
 	var h_mill: float = u * 0.30
 	var w_mill: float = h_mill * (float(WINDMILL_TEXTURE.get_width()) / float(WINDMILL_TEXTURE.get_height()))
@@ -252,8 +252,13 @@ func _add_windmill(gx: Callable, gy: Callable, u: float) -> Rect2:
 		Palette.c("roofBlue"), Palette.c("roofBlueShadow"),
 		0.75 + _seeded(5 * 9.1) * 0.6, 5 * 4.1 + 3.0, _wind, entities, 2,
 	)
-	mill.setup_rotating_overlay(WINDMILL_BLADES, WINDMILL_BLADES_DAMAGED, WINDMILL_HUB_FRAC, WINDMILL_BLADE_SPEED_BY_LEVEL, WINDMILL_BLADE_FORCE_MUL)
 	entities.add_child(mill)
+
+	var blades := WindmillBladesSprite.new()
+	blades.position = Vector2(-w_mill / 2.0 + WINDMILL_HUB_FRAC.x * w_mill, -h_mill + WINDMILL_HUB_FRAC.y * h_mill)
+	blades.setup(h_mill, _wind, mill)
+	mill.add_child(blades)
+
 	return Rect2(pos.x - w_mill / 2.0, pos.y - h_mill, w_mill, h_mill)
 
 ## house_rects: exact destination rects from _add_houses(), already
