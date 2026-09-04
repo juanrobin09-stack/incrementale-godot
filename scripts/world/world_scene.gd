@@ -142,13 +142,6 @@ const HOUSE_TEXTURES_DAMAGED := {
 }
 const WINDMILL_TEXTURE := preload("res://assets/windmill/windmill.png")
 const WINDMILL_TEXTURE_DAMAGED := preload("res://assets/windmill/windmill_damaged.png")
-## Fraction (0-1) of the tower texture's own width/height where the
-## sails' rotation centre sits — measured directly on the source art
-## (hub pixel (302,186) on the 565x565 canvas), not eyeballed. Used to
-## position windmill_blades_sprite.gd's child node; see its own header
-## for why the sails are procedural rather than a texture cut from this
-## same art.
-const WINDMILL_HUB_FRAC := Vector2(302.0 / 565.0, 186.0 / 565.0)
 
 ## Returns each house's exact destination rect (post-overlap-resolution)
 ## so _add_trees() can keep trees out of them — see the class header for
@@ -233,12 +226,16 @@ func _resolve_house_positions(defs: Array, sizes: Array, gx: Callable, gy: Calla
 ## village, its collapse should read at least as substantial as the
 ## blue/purple houses'.
 ##
-## The rotating sails are a separate WindmillBladesSprite, added as an
-## actual child of `mill` (not a sibling in `entities`) so they always
-## draw right after the tower and inherit its y-sort position instead of
-## being sorted independently by their own much-higher (near the roof)
-## y — see that script's own header for why they're procedural rather
-## than cut from this same reference art.
+## Static, like the reference art itself — its own painted sails included
+## as-is, not a separately rotating element. Two things were tried and
+## both reported back as looking wrong once actually seen in the game
+## (see git history: extracted-art blades turned to mush at this
+## renderer's nearest-neighbour scale; procedural blades on top of the
+## unmodified tower doubled up with the art's own painted sails
+## underneath, and read as disproportionate even after retuning) — rather
+## than a third attempt, the windmill stays exactly what the provided
+## reference art shows, the same footing every house's sprite is already
+## on.
 func _add_windmill(gx: Callable, gy: Callable, u: float) -> Rect2:
 	var h_mill: float = u * 0.30
 	var w_mill: float = h_mill * (float(WINDMILL_TEXTURE.get_width()) / float(WINDMILL_TEXTURE.get_height()))
@@ -253,11 +250,6 @@ func _add_windmill(gx: Callable, gy: Callable, u: float) -> Rect2:
 		0.75 + _seeded(5 * 9.1) * 0.6, 5 * 4.1 + 3.0, _wind, entities, 2,
 	)
 	entities.add_child(mill)
-
-	var blades := WindmillBladesSprite.new()
-	blades.position = Vector2(-w_mill / 2.0 + WINDMILL_HUB_FRAC.x * w_mill, -h_mill + WINDMILL_HUB_FRAC.y * h_mill)
-	blades.setup(h_mill, _wind, mill)
-	mill.add_child(blades)
 
 	return Rect2(pos.x - w_mill / 2.0, pos.y - h_mill, w_mill, h_mill)
 

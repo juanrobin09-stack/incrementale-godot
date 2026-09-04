@@ -467,16 +467,6 @@ func _weather_reserved_cell(cell: Vector2i) -> void:
 	_composite_img.blend_rect(tint_img, Rect2i(0, 0, tint_w, tint_h), Vector2i(x0, y0))
 	_composite_dirty = true
 
-## Read-only state query for external decorative attachments — the
-## windmill's separately-scripted, procedurally-drawn blade child
-## (windmill_blades_sprite.gd) needs to know when to stop spinning
-## rather than turning through the collapse/ruined sequence, without
-## HouseSprite itself needing to know anything about windmills or own a
-## whole rotating-overlay subsystem for it. No house ever calls this;
-## harmless to expose.
-func is_intact() -> bool:
-	return _state == "intact"
-
 func _process(delta: float) -> void:
 	match _state:
 		"intact":
