@@ -36,15 +36,58 @@ extends Node2D
 ## exact destination rect (the same formula HouseSprite._draw() itself
 ## uses) and returns it; _add_trees() treats each tree as a circle sized
 ## to its own worst-case canopy reach (see its own header) and nudges
-## its position (_clear_of_rects/_clear_of_circles/_push_out_of_rect)
-## away from any house rect or already-placed tree it would otherwise
-## overlap, resolved BEFORE the tree is ever instantiated. Houses
-## themselves get the same treatment against each other first
-## (_resolve_house_positions) — current curated fx/fy don't overlap at
-## common resolutions, but the check is real, not assumed, since aspect
-## ratio varies by viewport. All of this is plain reusable geometry, not
-## tied to the current static defs arrays, so it applies the same way to
-## any future dynamic spawn — there just isn't one yet.
+## its position (_clear_of_rects/_clear_of_circles) away from any house
+## rect or already-placed tree it would otherwise overlap, resolved
+## BEFORE the tree is ever instantiated. Houses themselves get the same
+## treatment against each other first (_resolve_house_positions) —
+## current curated fx/fy don't overlap at common resolutions, but the
+## check is real, not assumed, since aspect ratio varies by viewport.
+## All of this is plain reusable geometry, not tied to the current
+## static defs arrays, so it applies the same way to any future dynamic
+## spawn — there just isn't one yet.
+##
+## A tree could still end up floating clear of the ground band entirely
+## (reported directly, screenshot: a tree adrift in the clouds) — traced
+## to the original per-rect push (move out through whichever single
+## edge of whichever single rect is nearest) having no notion of "stay
+## within the ground area" at all: when two houses' grown zones overlap
+## each other at a tree's height (confirmed happening between the gold
+## and green houses, and separately between the blue house and the
+## windmill, at ordinary resolutions), the nearest escape from ONE of
+## them can be straight up, with nothing stopping it once clear of that
+## rect — even though the new spot is still inside the OTHER rect, or
+## the sky. The same per-rect approach can also fail more quietly:
+## escaping rect A by the shortest path can land inside rect B, whose
+## own shortest escape lands back inside A — an infinite bounce that
+## still silently returns *some* position once the iteration cap is hit,
+## one that in this project's own testing was still measurably inside
+## the very rect it was supposed to have cleared.
+##
+## Fixed by resolving all of a tree's blocking rects AT ONCE rather than
+## one at a time: at the tree's own (fixed) y, every rect whose grown
+## span covers that y contributes a horizontal interval; overlapping
+## intervals are merged first, and the tree escapes past the OUTER edge
+## of whichever merged span currently contains it — a single move that
+## clears every rect in that cluster together, never just the one it
+## happened to touch first, so it can't bounce back into a neighbour or
+## "escape" through a direction that was never actually clear. Movement
+## is also now strictly horizontal — a tree's fy is its curated depth/
+## row in the layout and this is the only thing that makes that
+## guaranteed to survive collision resolution intact; vertical movement
+## is what let a tree leave the ground band for the sky in the first
+## place, and nothing in this layout ever needs a tree pushed toward or
+## away from the viewer to explain a horizontal gap.
+##
+## This village is laid out densely enough that a handful of aspect
+## ratios genuinely have no fully clear horizontal spot at some tree
+## heights at all (checked directly: several houses' combined margins
+## can span nearly the full screen width at once) — TREE_MAX_PUSH_MUL
+## bounds how far a single tree will travel chasing a perfect spot, and
+## the position is clamped back onto the screen afterwards, so a village
+## this tight settles for the best reachable position instead of parking
+## a tree off-screen or clear across it. Several trees' fy were also
+## moved deeper (see _add_trees' own defs) to rows with genuinely more
+## room in the first place, rather than leaning on the push alone.
 ##
 ## The windmill (_add_windmill) is a HouseSprite too, now that real
 ## reference art exists for it (assets/windmill/) — requested explicitly:
@@ -263,23 +306,46 @@ func _add_windmill(gx: Callable, gy: Callable, u: float) -> Rect2:
 ## `width/2` a naive "radius" reading of the parameter would suggest —
 ## sized from that worst case, not the average, since the one thing that
 ## must never happen is a canopy still visibly clipping into a house.
+## TREE_HOUSE_MARGIN doubled (was 4.0) for some slack against wind-driven
+## sway on top of that resting shape (tree_sprite.gd's LEVEL_BEND_MUL/
+## LEVEL_FLUTTER_MUL, reported as still grazing a house under strong
+## wind) — not the full worst-case sway reach (measured directly from
+## tree_sprite.gd's own bend/flutter/cluster formulas at max wind: 2-3x
+## a tree's width, which this village's current house spacing has no
+## room for at all, several aspect ratios tested) but a real, if partial,
+## improvement over the original's zero.
 const TREE_CANOPY_R_MUL := 1.0
-const TREE_HOUSE_MARGIN := 4.0
+const TREE_HOUSE_MARGIN := 8.0
+const TREE_MAX_PUSH_MUL := 6.0
 
+## fy moved deeper than the original 0.06-0.15 band for the 4 trees that
+## needed it (tree4's own 0.42 was always fine) — that original band
+## sits right where several houses' own footprints are, so clearing them
+## meant squeezing into whatever gap happened to be left, which wasn't
+## always wide enough to hold a full canopy once the margin above is
+## accounted for. Re-picked by checking, for each tree's own fx, how
+## deep it has to sit before _clear_of_rects needs only a small nudge
+## instead of a large one, across the same wide battery of resolutions
+## used elsewhere in this file — not eyeballed. Reads as a village with
+## a row of trees standing a little further forward than the houses
+## rather than tucked directly beside them; flagged here since it's a
+## real, visible layout change, not just a bugfix.
 func _add_trees(gx: Callable, gy: Callable, u: float, house_rects: Array) -> void:
 	var defs := [
-		{"fx": 0.145, "fy": 0.14, "type": "round", "width": u * 0.11, "height": u * 0.30, "flex": 1.1},
-		{"fx": 0.30, "fy": 0.06, "type": "round", "width": u * 0.09, "height": u * 0.24, "flex": 1.2},
-		{"fx": 0.70, "fy": 0.15, "type": "round", "width": u * 0.105, "height": u * 0.28, "flex": 1.0},
-		{"fx": 0.865, "fy": 0.08, "type": "round", "width": u * 0.095, "height": u * 0.25, "flex": 1.15},
+		{"fx": 0.145, "fy": 0.32, "type": "round", "width": u * 0.11, "height": u * 0.30, "flex": 1.1},
+		{"fx": 0.30, "fy": 0.32, "type": "round", "width": u * 0.09, "height": u * 0.24, "flex": 1.2},
+		{"fx": 0.70, "fy": 0.45, "type": "round", "width": u * 0.105, "height": u * 0.28, "flex": 1.0},
+		{"fx": 0.865, "fy": 0.40, "type": "round", "width": u * 0.095, "height": u * 0.25, "flex": 1.15},
 		{"fx": 0.015, "fy": 0.42, "type": "round", "width": u * 0.135, "height": u * 0.35, "flex": 0.9},
 	]
+	var screen_x0: float = gx.call(0.0)
+	var screen_x1: float = gx.call(1.0)
 	var placed: Array = []
 	for i in range(defs.size()):
 		var d = defs[i]
 		var canopy_r: float = float(d["width"]) * TREE_CANOPY_R_MUL
 		var pos: Vector2 = Vector2(gx.call(d["fx"]), gy.call(d["fy"]))
-		pos = _clear_of_rects(pos, canopy_r, house_rects)
+		pos = _clear_of_rects(pos, canopy_r, house_rects, screen_x0, screen_x1)
 		pos = _clear_of_circles(pos, canopy_r, placed)
 
 		var tree := TreeSprite.new()
@@ -288,54 +354,87 @@ func _add_trees(gx: Callable, gy: Callable, u: float, house_rects: Array) -> voi
 		entities.add_child(tree)
 		placed.append({"pos": pos, "r": canopy_r})
 
-## Standard minimum-translation-vector push: moves `p` out of `grown`
-## along whichever of its 4 edges is closest, instead of always toward
-## the rect's centre — cheaper displacement, and it can't overshoot into
-## a neighbour on the far side of a wide house.
-func _push_out_of_rect(p: Vector2, grown: Rect2) -> Vector2:
-	var left: float = p.x - grown.position.x
-	var right: float = grown.position.x + grown.size.x - p.x
-	var top: float = p.y - grown.position.y
-	var bottom: float = grown.position.y + grown.size.y - p.y
-	var min_d: float = min(min(left, right), min(top, bottom))
-	if min_d == left:
-		return Vector2(grown.position.x - 0.5, p.y)
-	elif min_d == right:
-		return Vector2(grown.position.x + grown.size.x + 0.5, p.y)
-	elif min_d == top:
-		return Vector2(p.x, grown.position.y - 0.5)
-	return Vector2(p.x, grown.position.y + grown.size.y + 0.5)
-
-## Nudges `pos` clear of every rect in `rects`, each grown by `radius`
-## (the tree's own canopy reach) plus a fixed margin — bounded iteration
-## since resolving one overlap can reveal another, cheap at this scale
-## (a handful of houses, once at build()).
-func _clear_of_rects(pos: Vector2, radius: float, rects: Array) -> Vector2:
+## Nudges `pos` horizontally clear of every rect in `rects`, each grown
+## by `radius` (canopy reach) plus TREE_HOUSE_MARGIN — horizontal-only,
+## never vertical (see class header for why: a tree's fy is its curated
+## depth and must survive this intact). Resolves every blocking rect AT
+## the tree's own fixed y AT ONCE rather than one at a time: their grown
+## horizontal spans are merged into a union of intervals first, and the
+## tree escapes past the outer edge of whichever merged interval
+## currently contains it — a naive "escape whichever single rect is
+## nearest" approach can bounce forever between two rects whose grown
+## zones overlap each other at this y (confirmed happening in this exact
+## layout), since escaping one lands back inside the other.
+##
+## TREE_MAX_PUSH_MUL bounds how far a single tree will travel chasing a
+## fully clear spot (measured from its own curated position, not
+## iteration to iteration) — see class header for why this layout can't
+## always offer one — and the result is clamped back onto the screen
+## afterwards (canopy allowed a little overhang past the edge, same as
+## this file already accepts for the leftmost tree today) rather than
+## left to land off it entirely.
+func _clear_of_rects(pos: Vector2, radius: float, rects: Array, screen_x0: float, screen_x1: float) -> Vector2:
 	var p: Vector2 = pos
+	var max_push: float = radius * TREE_MAX_PUSH_MUL
 	for _iter in range(8):
-		var moved: bool = false
+		var intervals: Array = []
 		for rect in rects:
-			var grown: Rect2 = (rect as Rect2).grow(radius + TREE_HOUSE_MARGIN)
-			if grown.has_point(p):
-				p = _push_out_of_rect(p, grown)
-				moved = true
-		if not moved:
+			var r: Rect2 = rect
+			var gy0: float = r.position.y - radius - TREE_HOUSE_MARGIN
+			var gy1: float = r.position.y + r.size.y + radius + TREE_HOUSE_MARGIN
+			if gy0 <= p.y and p.y <= gy1:
+				var gx0: float = r.position.x - radius - TREE_HOUSE_MARGIN
+				var gx1: float = r.position.x + r.size.x + radius + TREE_HOUSE_MARGIN
+				intervals.append(Vector2(gx0, gx1))
+		if intervals.is_empty():
 			break
+		intervals.sort_custom(func(a, b): return a.x < b.x)
+		var merged: Array = [intervals[0]]
+		for i in range(1, intervals.size()):
+			var iv: Vector2 = intervals[i]
+			var last: Vector2 = merged[merged.size() - 1]
+			if iv.x <= last.y:
+				merged[merged.size() - 1] = Vector2(last.x, max(last.y, iv.y))
+			else:
+				merged.append(iv)
+		var found_blocking: bool = false
+		var blocking: Vector2 = Vector2.ZERO
+		for iv in merged:
+			if iv.x <= p.x and p.x <= iv.y:
+				blocking = iv
+				found_blocking = true
+				break
+		if not found_blocking:
+			break
+		var target_x: float = blocking.x - 0.5 if (p.x - blocking.x <= blocking.y - p.x) else blocking.y + 0.5
+		if abs(target_x - pos.x) > max_push:
+			target_x = pos.x + max_push * (1.0 if target_x > pos.x else -1.0)
+		if is_equal_approx(target_x, p.x):
+			break
+		p = Vector2(target_x, p.y)
+	p.x = clamp(p.x, screen_x0 - radius * 0.7, screen_x1 + radius * 0.7)
 	return p
 
 ## Same idea as _clear_of_rects but against already-placed trees, each
-## treated as a circle (canopy radius + margin) rather than a rect.
+## treated as a circle (canopy radius + margin) rather than a rect —
+## also horizontal-only, for the same reason. y is fixed, so the
+## horizontal offset needed to clear a circle at a given fixed vertical
+## separation is a plain right triangle: dx = sqrt(min_dist^2 - dy^2).
 func _clear_of_circles(pos: Vector2, radius: float, placed: Array) -> Vector2:
 	var p: Vector2 = pos
 	for _iter in range(8):
 		var moved: bool = false
 		for other in placed:
+			var opos: Vector2 = other["pos"]
 			var min_dist: float = radius + float(other["r"]) + TREE_HOUSE_MARGIN
-			var diff: Vector2 = p - (other["pos"] as Vector2)
-			var dist: float = diff.length()
+			var dy: float = p.y - opos.y
+			if abs(dy) >= min_dist:
+				continue
+			var dist: float = Vector2(p.x - opos.x, dy).length()
 			if dist < min_dist:
-				var dir: Vector2 = diff / dist if dist > 0.01 else Vector2(1.0, 0.0)
-				p = (other["pos"] as Vector2) + dir * min_dist
+				var sign: float = 1.0 if p.x >= opos.x else -1.0
+				var need_dx2: float = min_dist * min_dist - dy * dy
+				p.x = opos.x + sign * (sqrt(need_dx2) if need_dx2 > 0.0 else min_dist)
 				moved = true
 		if not moved:
 			break
