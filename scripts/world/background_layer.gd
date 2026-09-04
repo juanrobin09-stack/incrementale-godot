@@ -1,7 +1,7 @@
 class_name BackgroundLayer
 extends PixelDrawer
-## Sky (24-band gradient + sun), hills, horizon haze, textured ground,
-## and the road — direct translation of drawSky/drawHills/
+## Sky (gradient + sun), hills, horizon haze, textured ground, and the
+## road — originally a direct translation of drawSky/drawHills/
 ## drawHorizonHaze/drawGround/drawRoad from render.js, including the
 ## storm-driven colour shift (computeSkyStormT/computeStormShade read
 ## live from GameState's disaster stages, same formulas as the
@@ -9,6 +9,15 @@ extends PixelDrawer
 ## seeded blob clusters, drifting with the shared WindEngine). The storm
 ## darkening overlay and the always-on vignette are deferred — visual
 ## polish, not core weather.
+##
+## Ground/road/sky/cloud detail level raised in a later pass, once the
+## houses became real painted reference art (assets/houses/) instead of
+## procedural drawing — a flat rect road and a single light/dark ground
+## speckle read as a different, much cruder game next to that art. Still
+## the same flat-shaded px_rect/px_circle primitives (no new rendering
+## technique, no texture assets for this layer — see palette.gd's header
+## for why: no image-generation tool available, so this had to stay
+## procedural), just noticeably more of them and more color variety.
 
 var logical_w: float
 var logical_h: float
@@ -19,6 +28,7 @@ var road_w: float
 var wind: WindEngine
 
 var _ground_texture: Array = []
+var _road_texture: Array = []
 var _cloud_defs: Array = []
 
 func setup(p_w: float, p_h: float, p_ground_top: float, p_ground_h: float, p_road_x: float, p_road_w: float, p_wind: WindEngine) -> void:
@@ -30,6 +40,7 @@ func setup(p_w: float, p_h: float, p_ground_top: float, p_ground_h: float, p_roa
 	road_w = p_road_w
 	wind = p_wind
 	_build_ground_texture()
+	_build_road_texture()
 	_build_clouds()
 	queue_redraw()
 
@@ -82,14 +93,81 @@ func _update_clouds(delta: float) -> void:
 		var speed: float = (3.0 + c["layer"] * 1.3) * c["speedMul"]
 		c["traveled"] += speed * wind_speed_mul * delta
 
+## Four sparse detail layers instead of one flat scatter of light/dark
+## dots — a single 1px light-or-dark speckle was the single biggest gap
+## between this ground and the painted texture of the house references
+## (assets/houses/) once those replaced the procedural house drawing:
+## next to real material variation, one uniform green with speckle noise
+## reads as flat. Each layer's colour is resolved once here (not per
+## frame in _draw_ground) since setup() already reruns per resize.
 func _build_ground_texture() -> void:
 	_ground_texture.clear()
-	var n: int = int(round((logical_w * ground_h) / 90.0))
-	for i in range(n):
+	var area: float = logical_w * ground_h
+
+	var blade_colors := [Palette.c("grassShadow"), Palette.c("grassDeep"), Palette.c("grassLight"), Palette.c("grassLight2")]
+	var blade_n: int = int(round(area / 70.0))
+	for i in range(blade_n):
+		var n: float = seeded(i * 2.3)
+		var color: Color = blade_colors[0] if n < 0.35 else (blade_colors[1] if n < 0.55 else (blade_colors[2] if n < 0.8 else blade_colors[3]))
+		var tall: bool = seeded(i * 9.7 + 4.0) > 0.5
 		_ground_texture.append({
-			"x": seeded(i * 3.1) * logical_w,
-			"y": seeded(i * 7.7 + 1) * ground_h,
-			"dark": seeded(i * 2.3) > 0.5,
+			"x": seeded(i * 3.1) * logical_w, "y": seeded(i * 7.7 + 1.0) * ground_h,
+			"w": 1.0, "h": 2.0 if tall else 1.0, "color": color,
+		})
+
+	var dirt_c: Color = Palette.c("dirt")
+	var dirt_dark_c: Color = Palette.c("dirtDark")
+	var dry_c: Color = Palette.c("grassDry")
+	var patch_n: int = int(round(area / 900.0))
+	for i in range(patch_n):
+		var s: float = i * 5.9 + 100.0
+		var pick: float = seeded(s + 1.0)
+		var color: Color = dirt_dark_c if pick > 0.66 else (dirt_c if pick > 0.33 else dry_c)
+		_ground_texture.append({
+			"x": seeded(s) * logical_w, "y": seeded(s + 2.0) * ground_h,
+			"w": 2.0 + seeded(s + 3.0) * 2.0, "h": 2.0 + seeded(s + 4.0) * 1.0, "color": color,
+		})
+
+	var pebble_light: Color = Palette.c("stoneLight")
+	var pebble_dark: Color = Palette.c("stoneDark")
+	var pebble_n: int = int(round(area / 700.0))
+	for i in range(pebble_n):
+		var s: float = i * 6.7 + 200.0
+		var color: Color = pebble_dark if seeded(s + 1.0) > 0.5 else pebble_light
+		_ground_texture.append({
+			"x": seeded(s) * logical_w, "y": seeded(s + 2.0) * ground_h,
+			"w": 1.0 + seeded(s + 3.0), "h": 1.0, "color": color,
+		})
+
+	var flower_accent: Color = Palette.c("flowerAccent")
+	var flower_glow: Color = Palette.c("windowGlow")
+	var flower_n: int = int(round(area / 1400.0))
+	for i in range(flower_n):
+		var s: float = i * 8.3 + 300.0
+		var color: Color = flower_glow if seeded(s + 1.0) > 0.5 else flower_accent
+		_ground_texture.append({
+			"x": seeded(s) * logical_w, "y": seeded(s + 2.0) * ground_h,
+			"w": 1.0, "h": 1.0, "color": color,
+		})
+
+## Sparse worn/pebble detail scattered across the road's own area —
+## positions stored relative to (road_x - road_w/2, ground_top) so they
+## stay put regardless of the edge jitter _draw_road() applies around
+## them (see _road_edge_offset).
+func _build_road_texture() -> void:
+	_road_texture.clear()
+	var area: float = road_w * ground_h
+	var stone_c: Color = Palette.c("stone")
+	var stone_dark_c: Color = Palette.c("stoneDark")
+	var dirt_light_c: Color = Palette.c("dirtLight")
+	var n: int = int(round(area / 75.0))
+	for i in range(n):
+		var s: float = i * 4.3 + 500.0
+		var pick: float = seeded(s + 1.0)
+		var color: Color = stone_dark_c if pick > 0.75 else (stone_c if pick > 0.5 else dirt_light_c)
+		_road_texture.append({
+			"x": seeded(s) * road_w, "y": seeded(s + 2.0) * ground_h,
+			"w": 1.0 + seeded(s + 3.0), "h": 1.0, "color": color,
 		})
 
 func _process(delta: float) -> void:
@@ -115,14 +193,24 @@ func _draw() -> void:
 	_draw_ground(storm_shade)
 	_draw_road()
 
+## Four gradient stops now, not three (skyUpperAccent added on top of
+## the original top/mid/horizon) — one more band of depth at the zenith,
+## which read as flat/empty next to the shading in the house references.
 func _draw_sky(storm_t: float) -> void:
+	var upper: Color = Palette.c("skyUpperAccent").lerp(Palette.c("skyTopStorm"), storm_t)
 	var top: Color = Palette.c("skyTop").lerp(Palette.c("skyTopStorm"), storm_t)
 	var mid: Color = Palette.c("skyMid").lerp(Palette.c("skyMidStorm"), storm_t)
 	var horizon: Color = Palette.c("skyHorizon").lerp(Palette.c("skyHorizonStorm"), storm_t)
-	var band_h: float = ceil(logical_h / 24.0)
-	for i in range(24):
-		var p: float = float(i) / 23.0
-		var color: Color = top.lerp(mid, p / 0.6) if p < 0.6 else mid.lerp(horizon, (p - 0.6) / 0.4)
+	var band_h: float = ceil(logical_h / 28.0)
+	for i in range(28):
+		var p: float = float(i) / 27.0
+		var color: Color
+		if p < 0.3:
+			color = upper.lerp(top, p / 0.3)
+		elif p < 0.6:
+			color = top.lerp(mid, (p - 0.3) / 0.3)
+		else:
+			color = mid.lerp(horizon, (p - 0.6) / 0.4)
 		px_rect(0, i * band_h, logical_w, band_h + 1, color)
 
 	if storm_t < 0.85:
@@ -133,6 +221,10 @@ func _draw_sky(storm_t: float) -> void:
 		# draw_*() calls have no ambient-alpha equivalent, so the fade has
 		# to be multiplied into every colour used here instead.
 		var fade: float = max(0.0, 1.0 - storm_t * 1.3)
+		# Two nested halos (was one) — a wide faint one plus the tighter
+		# original — reads as light diffusing into the sky instead of a
+		# single flat ring around the disc.
+		draw_circle(Vector2(sun_x, sun_y), r * 3.6, Color(1.0, 0.902, 0.6, 0.12 * fade))
 		draw_circle(Vector2(sun_x, sun_y), r * 2.1, Color(1.0, 0.847, 0.451, 0.25 * fade))
 		var sun_c: Color = Palette.c("sun")
 		var sun_mid_c: Color = Palette.c("sunMid")
@@ -145,6 +237,7 @@ func _draw_sky(storm_t: float) -> void:
 func _draw_clouds(storm_t: float) -> void:
 	var base: Color = Palette.c("cloudStorm") if storm_t > 0.4 else Palette.c("cloud")
 	var shadow: Color = Palette.c("cloudStormShadow") if storm_t > 0.4 else Palette.c("cloudShadow")
+	var highlight: Color = Color(1.0, 1.0, 1.0)
 	var dir: float = wind.direction
 	for c in _cloud_defs:
 		var cycle: float = logical_w + 260.0
@@ -164,6 +257,14 @@ func _draw_clouds(storm_t: float) -> void:
 				px_circle(bx, by, r, sc, sc)
 			else:
 				px_circle(bx, by, r, Color(base.r, base.g, base.b, alpha), Color(shadow.r, shadow.g, shadow.b, alpha))
+				# A smaller, brighter "sunlit crown" layered on top of the
+				# core blobs (not wisps, too thin to read a highlight on)
+				# — px_circle only ever splits left/right two-tone, so a
+				# top-lit puffy look needs a second, offset-up circle
+				# rather than a new primitive shared by every other sprite.
+				if not b["wisp"]:
+					var hl := Color(highlight.r, highlight.g, highlight.b, alpha * 0.5)
+					px_circle(bx - r * 0.12, by - r * 0.28, r * 0.5, hl, hl)
 
 func _draw_hills() -> void:
 	var w := logical_w
@@ -199,17 +300,53 @@ func _draw_horizon_haze(storm_t: float) -> void:
 func _draw_ground(storm_shade: float) -> void:
 	var grass: Color = Palette.c("grassMid").lerp(Color("#4c5a44"), storm_shade)
 	px_rect(0, ground_top, logical_w, ground_h, grass)
-	var light: Color = Palette.c("grassLight")
-	var shadow: Color = Palette.c("grassShadow")
 	for d in _ground_texture:
-		px_rect(d["x"], ground_top + d["y"], 1, 1, shadow if d["dark"] else light)
+		px_rect(d["x"], ground_top + d["y"], d["w"], d["h"], d["color"])
+
+## Smooth, low-amplitude wavy offset for one road edge at a given y —
+## a sum of two incommensurate sine waves (same idea as WindEngine's
+## force curve) rather than per-strip random jitter, so the edge reads
+## as one continuous wandering line instead of a jagged/noisy one.
+## side_seed offsets phase between the two edges so the road's width
+## itself subtly breathes instead of both edges snaking in lockstep —
+## a straight-sided rectangle was the clearest "this is a UI shape, not
+## a place" tell once the houses became real reference art.
+func _road_edge_offset(y: float, side_seed: float) -> float:
+	var t: float = y / max(1.0, ground_h)
+	var wave: float = sin(t * 11.0 + side_seed) * 0.6 + sin(t * 4.1 + side_seed * 1.7 + 1.3) * 0.4
+	return wave * road_w * 0.07
 
 func _draw_road() -> void:
 	var h: float = ground_h
-	px_rect(road_x - road_w / 2.0, ground_top, road_w, h, Palette.c("dirt"))
-	px_rect(road_x - road_w / 2.0, ground_top, 1, h, Palette.c("dirtDark"))
-	px_rect(road_x + road_w / 2.0 - 1, ground_top, 1, h, Palette.c("dirtDark"))
+	var dirt_c: Color = Palette.c("dirt")
+	var dirt_dark_c: Color = Palette.c("dirtDark")
+	var dirt_light_c: Color = Palette.c("dirtLight")
+	var grass_edge_c: Color = Palette.c("grassDark")
+	var grass_edge_c2: Color = Palette.c("grassShadow")
+
+	var step: float = 3.0
 	var y: float = 0.0
 	while y < h:
-		px_rect(road_x - 1, ground_top + y, 2, 4, Palette.c("dirtLight"))
+		var sh: float = min(step, h - y)
+		var left_x: float = road_x - road_w / 2.0 + _road_edge_offset(y, 0.0)
+		var right_x: float = road_x + road_w / 2.0 + _road_edge_offset(y, 7.3)
+		px_rect(left_x, ground_top + y, right_x - left_x, sh, dirt_c)
+		px_rect(left_x, ground_top + y, 1, sh, dirt_dark_c)
+		px_rect(right_x - 1, ground_top + y, 1, sh, dirt_dark_c)
+		# Grass tufts encroaching from the edges — sparse and seeded, not
+		# every strip, so they read as occasional weeds, not a border.
+		if seeded(y * 0.37 + 40.0) > 0.72:
+			px_rect(left_x - 1.0 - seeded(y * 0.51) * 1.0, ground_top + y, 1, 1, grass_edge_c if seeded(y * 0.19) > 0.5 else grass_edge_c2)
+		if seeded(y * 0.41 + 90.0) > 0.72:
+			px_rect(right_x + seeded(y * 0.59) * 1.0, ground_top + y, 1, 1, grass_edge_c if seeded(y * 0.23) > 0.5 else grass_edge_c2)
+		y += step
+
+	# Worn centre path, wandering gently with the road rather than
+	# staying perfectly straight against now-wavy edges.
+	y = 0.0
+	while y < h:
+		px_rect(road_x - 1 + _road_edge_offset(y, 3.5) * 0.3, ground_top + y, 2, 4, dirt_light_c)
 		y += 10
+
+	for d in _road_texture:
+		px_rect(road_x - road_w / 2.0 + d["x"], ground_top + d["y"], d["w"], d["h"], d["color"])

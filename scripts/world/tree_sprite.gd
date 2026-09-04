@@ -129,6 +129,13 @@ func _draw_structure(origin_x: float, force: float, direction: float, t: float) 
 	px_ellipse(origin_x, 0, width * 0.32, width * 0.09, Color(30.0 / 255.0, 25.0 / 255.0, 15.0 / 255.0, 0.25))
 	var tip: Vector2 = px_tapered_bend(origin_x, 0, trunk_h, base_w, tip_w, bend, Palette.c("trunk"), Palette.c("trunkDark"))
 
+	# One bark highlight streak, bent along the same pow(t,1.6) curve the
+	# trunk itself tapers/bends on, so it reads as sitting on the trunk's
+	# surface rather than floating independently as the tree sways.
+	var streak_y: float = -trunk_h * (0.25 + seeded(seed_val + 80.0) * 0.35)
+	var streak_bend: float = bend * pow(clamp(-streak_y / trunk_h, 0.0, 1.0), 1.6)
+	px_rect(origin_x + streak_bend + base_w * 0.1, streak_y, 1, trunk_h * 0.2, Palette.c("trunkLit"))
+
 	var branch_defs: Array
 	if tree_type == "pine":
 		branch_defs = [
@@ -176,12 +183,34 @@ func _draw_structure(origin_x: float, force: float, direction: float, t: float) 
 	else:
 		var leaf_light: Color = Palette.c("leafLight")
 		var leaf_mid: Color = Palette.c("leafMid")
-		px_circle(tip.x, tip.y - width * 0.18, width * 0.42, leaf_light, leaf_mid)
+		var leaf_dark: Color = Palette.c("leafDark")
+		var leaf_pale: Color = Palette.c("leafPale")
+		_draw_foliage_cluster(tip.x, tip.y - width * 0.18, width * 0.4, leaf_light, leaf_mid, leaf_dark, leaf_pale, seed_val + 50.0)
 		for i in range(tips.size()):
 			var tp: Vector2 = tips[i]
 			var puff_flutter: float = 0.5 + 0.5 * sin(t * 6.0 + seed_val * 9.0 + i)
 			var j: float = puff_flutter * force * direction * 1.2
-			px_circle(tp.x + j, tp.y + j * 0.4, width * 0.27, leaf_light, leaf_mid)
+			_draw_foliage_cluster(tp.x + j, tp.y + j * 0.4, width * 0.26, leaf_light, leaf_mid, leaf_dark, leaf_pale, seed_val + i * 17.0 + 60.0)
+
+## One foliage mass drawn as a small cluster of overlapping circles
+## instead of a single one — a lone flat circle per branch tip was the
+## clearest "this is a placeholder, not a tree" tell once the houses
+## became real reference art (assets/houses/). Layout/tone/size jitter
+## is a pure function of cluster_seed (same idiom as _bend_at_y below —
+## nothing stored, stable frame to frame), so the cluster still moves
+## live with whatever branch tip calls it (cx, cy already include this
+## frame's wind sway) without needing its own per-instance state.
+func _draw_foliage_cluster(cx: float, cy: float, r: float, light: Color, mid: Color, dark: Color, pale: Color, cluster_seed: float) -> void:
+	px_circle(cx, cy, r, light, mid)
+	var extra: int = 2 + int(floor(seeded(cluster_seed) * 2.0))
+	for i in range(extra):
+		var ang: float = seeded(cluster_seed + i * 3.1 + 1.0) * TAU
+		var dist: float = r * (0.5 + seeded(cluster_seed + i * 4.7 + 2.0) * 0.55)
+		var sr: float = r * (0.42 + seeded(cluster_seed + i * 2.3 + 3.0) * 0.3)
+		var tone_pick: float = seeded(cluster_seed + i * 5.9 + 4.0)
+		var c1: Color = dark if tone_pick < 0.35 else (pale if tone_pick > 0.8 else light)
+		var c2: Color = dark if tone_pick < 0.35 else mid
+		px_circle(cx + cos(ang) * dist, cy + sin(ang) * dist * 0.6, sr, c1, c2)
 
 func _bend_at_y(y: float, trunk_h: float, bend: float, trunk_tip_y: float) -> float:
 	if y >= trunk_tip_y:
