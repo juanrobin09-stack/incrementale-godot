@@ -34,6 +34,21 @@ extends Control
 ## "recentrer" action would misrepresent what pressing it does, so that
 ## button keeps a recenter-shaped glyph instead. Everything else in the
 ## header (title, currency pill, close) matches.
+##
+## That first pass reported back, screenshot attached, as reading like
+## nothing had changed at all — every colour/label/layout change from it
+## WAS live (visible in the screenshot itself: the gold title, the
+## "N KO disponibles" pill, the violet-bordered core node, the diamond
+## line joints), but flat StyleBoxFlat colour with a thin uniform border
+## next to the reference's carved-stone bevel and real padlock icon
+## reads as "unchanged placeholder" rather than "different art budget".
+## Two fixes from that: every button here is now a TreeNodeButton (see
+## that class) instead of a plain Button, adding a drawn highlight/
+## shadow bevel and, on locked nodes, a drawn padlock shape instead of
+## the 🔒 emoji; and this overlay's backdrop is now fully opaque (was
+## 0.985) — the previous near-opaque value let a sliver of the bright
+## world scene behind bleed through at full-screen scale, which likely
+## read as part of the "doesn't look different" impression too.
 
 const TREE_RADIUS_STEP := 150.0
 const TREE_CANVAS_SIZE := 2000.0
@@ -44,7 +59,7 @@ const TREE_CENTER := 1000.0
 # on Godot's default theme (see README: a full HUD fidelity pass is its own
 # later, separately-scoped task, not part of this one).
 # ---------------------------------------------------------------------------
-const COL_BG := Color(0.055, 0.048, 0.043, 0.985)
+const COL_BG := Color(0.055, 0.048, 0.043, 1.0)
 const COL_STONE := Color(0.145, 0.125, 0.107, 1.0)
 const COL_STONE_LIGHT := Color(0.205, 0.178, 0.148, 1.0)
 const COL_LOCKED_BG := Color(0.085, 0.075, 0.065, 1.0)
@@ -201,14 +216,16 @@ func _build_header(parent: Node) -> void:
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(spacer)
 
-	var zoom_out_btn := Button.new()
+	var zoom_out_btn := TreeNodeButton.new()
+	zoom_out_btn.bevel = true
 	zoom_out_btn.text = "−"
 	zoom_out_btn.custom_minimum_size = Vector2(36, 36)
 	zoom_out_btn.pressed.connect(func(): _zoom_by(1.0 / 1.25, _viewport_center()))
 	_apply_button_style(zoom_out_btn, _stone_style(COL_STONE, COL_BORDER, 2, 6), COL_TEXT, 18)
 	header.add_child(zoom_out_btn)
 
-	var zoom_in_btn := Button.new()
+	var zoom_in_btn := TreeNodeButton.new()
+	zoom_in_btn.bevel = true
 	zoom_in_btn.text = "+"
 	zoom_in_btn.custom_minimum_size = Vector2(36, 36)
 	zoom_in_btn.pressed.connect(func(): _zoom_by(1.25, _viewport_center()))
@@ -217,14 +234,16 @@ func _build_header(parent: Node) -> void:
 
 	# Recentre — kept as its own working feature rather than mapped to
 	# the reference's padlock icon; see class header.
-	var recenter_btn := Button.new()
+	var recenter_btn := TreeNodeButton.new()
+	recenter_btn.bevel = true
 	recenter_btn.text = "⌖"
 	recenter_btn.custom_minimum_size = Vector2(36, 36)
 	recenter_btn.pressed.connect(_center_view)
 	_apply_button_style(recenter_btn, _stone_style(COL_STONE, COL_BORDER, 2, 6), COL_TEXT, 18)
 	header.add_child(recenter_btn)
 
-	var close_btn := Button.new()
+	var close_btn := TreeNodeButton.new()
+	close_btn.bevel = true
 	close_btn.text = "✕"
 	close_btn.custom_minimum_size = Vector2(36, 36)
 	close_btn.pressed.connect(close)
@@ -287,7 +306,8 @@ func _build_inspector(parent: Node) -> void:
 	_label_inspector_state.add_theme_color_override("font_color", COL_TEXT_DIM)
 	text_box.add_child(_label_inspector_state)
 
-	_button_inspector_buy = Button.new()
+	_button_inspector_buy = TreeNodeButton.new()
+	_button_inspector_buy.bevel = true
 	_button_inspector_buy.pressed.connect(_on_inspector_buy_pressed)
 	_apply_button_style(_button_inspector_buy, _stone_style(COL_STONE_LIGHT, COL_GOLD, 2, 6), COL_GOLD, 16)
 	box.add_child(_button_inspector_buy)
@@ -302,7 +322,8 @@ func _build_nodes() -> void:
 
 	for id in GameData.UPGRADE_TREE:
 		var pos: Vector2 = positions[id]
-		var btn := Button.new()
+		var btn := TreeNodeButton.new()
+		btn.bevel = true
 		btn.custom_minimum_size = Vector2(64, 64)
 		btn.size = Vector2(64, 64)
 		btn.position = pos - Vector2(32, 32)
@@ -358,11 +379,13 @@ func _process(_delta: float) -> void:
 
 func _refresh_nodes() -> void:
 	for id in _node_buttons:
-		var btn: Button = _node_buttons[id]
+		var btn: TreeNodeButton = _node_buttons[id]
 		var node_data: Dictionary = GameData.UPGRADE_TREE[id]
 		var auto_owned: bool = node_data.get("auto_owned", false)
 		var node_state: String = "purchased" if auto_owned else GameState.get_tree_node_state(id)
-		btn.text = "🔒" if node_state == "coming-soon" else node_data.get("icon", "")
+		var locked: bool = node_state == "coming-soon"
+		btn.text = "" if locked else node_data.get("icon", "")
+		btn.draw_lock = locked
 
 		var bg: Color = COL_STONE
 		var border: Color = COL_BORDER
@@ -408,6 +431,8 @@ func _refresh_nodes() -> void:
 			border = Color(0.85, 0.82, 0.90, 1.0)
 			border_w = 3
 		_apply_button_style(btn, _stone_style(bg, border, border_w, 6, glow), font_color, 26)
+		btn.lock_color = font_color
+		btn.queue_redraw()
 
 # ---------------------------------------------------------------------------
 # Node selection & inspector
