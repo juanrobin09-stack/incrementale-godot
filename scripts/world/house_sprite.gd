@@ -223,12 +223,26 @@ func _pick_cells(row_lo: int, row_hi: int, n: int, salt: float) -> Array:
 		return seeded(_house_seed + a.x * 5.7 + a.y * 11.3 + salt) < seeded(_house_seed + b.x * 5.7 + b.y * 11.3 + salt))
 	return candidates.slice(0, min(n, candidates.size()))
 
-## Copies one cell's worth of pixels from the (already same-size)
-## resized damaged image into the composite — a straight copy, alpha
-## included, no blending, so the edge stays hard rather than fading.
+## Composites one cell's worth of the resized damaged image onto the
+## composite — alpha-blended (blend_rect), NOT a straight overwrite
+## (blit_rect). This is not the rejected temporal fade: it's instant,
+## one-shot, per cell, same as before — the difference is only how
+## overlapping transparency resolves. intact and texture_damaged are two
+## independently-drawn references with different silhouette proportions
+## (confirmed: e.g. red intact is 465x534, red damaged is 263x252, a
+## visibly different aspect ratio), so stretching damaged to intact's
+## shared footprint does not perfectly line up every contour — at some
+## cells the (stretched) damaged art is thinner/more transparent right
+## where intact was solid, e.g. near a roofline edge. blit_rect would
+## overwrite with that thinner alpha and punch a false empty hole into
+## what was solid roof — reproduced and confirmed by simulating this
+## exact resize+overwrite in isolation. blend_rect composites src over
+## dst instead: result_alpha = src_alpha + dst_alpha*(1-src_alpha), which
+## can only stay >= dst_alpha, so a reveal can never erase existing solid
+## content — it only ever layers genuine damage detail on top of it.
 func _blit_cell(x0: int, y0: int, x1: int, y1: int) -> void:
 	var rect := Rect2i(x0, y0, max(1, x1 - x0), max(1, y1 - y0))
-	_composite_img.blit_rect(_damaged_resized, rect, Vector2i(x0, y0))
+	_composite_img.blend_rect(_damaged_resized, rect, Vector2i(x0, y0))
 	_composite_dirty = true
 
 func _blit_fine_cell(fx: int, fy: int) -> void:
