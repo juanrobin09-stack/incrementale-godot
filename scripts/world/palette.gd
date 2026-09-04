@@ -7,7 +7,7 @@ extends RefCounted
 ## keeping identical keys means a lookup here can be compared line-by-
 ## line against the original instead of trusting a renamed transcription.
 ##
-## grassLight2/grassDeep/grassDry/leafPale/lampIron/lampIronLit/
+## grassLight2/grassDeep/leafPale/lampIron/lampIronLit/
 ## skyUpperAccent have no render.js counterpart — added for
 ## the decor-vs-house visual coherence pass (ground/tree/lamp/sky detail
 ## richness) once the houses became real reference art these procedural
@@ -23,7 +23,7 @@ const PAL := {
 	"cloudStorm": "#5c6577", "cloudStormShadow": "#3c4353",
 	"hillsFar": "#82a6ae", "hillsNear": "#5f8b93",
 	"grassLight": "#8fcf6e", "grassMid": "#6fae52", "grassDark": "#4f8f3d", "grassShadow": "#3d7230",
-	"grassLight2": "#a8dc7e", "grassDeep": "#2f5c26", "grassDry": "#c2a85e",
+	"grassLight2": "#a8dc7e", "grassDeep": "#2f5c26",
 	"dirt": "#a3835a", "dirtDark": "#7a6142", "dirtLight": "#cfae7c",
 	"waterDeep": "#1f6f9c", "waterMid": "#3391c4", "waterLight": "#78d0ee", "waterFoam": "#eaf8ff",
 	"wood": "#a06b38", "woodDark": "#6b4523", "woodLight": "#c98f52",

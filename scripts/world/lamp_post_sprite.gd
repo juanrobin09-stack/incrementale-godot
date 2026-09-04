@@ -34,10 +34,12 @@ func _draw() -> void:
 	# Stone base.
 	px_rect(-3, -3, 6, 3, stone_dark_c)
 
-	# Pole — a highlight strip down one side instead of one flat tone,
-	# plus two banded collars.
+	# Pole — plus two banded collars. Used to also carry a highlight
+	# strip down one side (instead of one flat tone) from near the base
+	# up past the middle, but that read as a stray grey line up the pole
+	# rather than a highlight — reported directly, twice; removed rather
+	# than retuned.
 	px_rect(-1, -h, 2, h - 4.0, iron)
-	px_rect(-1, -h * 0.35, 1, max(0.0, h - 4.0 - h * 0.35), iron_lit)
 	px_rect(-2, -h * 0.35, 4, 1, iron_lit)
 	px_rect(-2, -h * 0.75, 4, 1, iron_lit)
 

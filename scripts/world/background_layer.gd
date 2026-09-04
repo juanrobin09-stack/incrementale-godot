@@ -93,13 +93,19 @@ func _update_clouds(delta: float) -> void:
 		var speed: float = (3.0 + c["layer"] * 1.3) * c["speedMul"]
 		c["traveled"] += speed * wind_speed_mul * delta
 
-## Four sparse detail layers instead of one flat scatter of light/dark
-## dots — a single 1px light-or-dark speckle was the single biggest gap
-## between this ground and the painted texture of the house references
+## Sparse detail layers instead of one flat scatter of light/dark dots —
+## a single 1px light-or-dark speckle was the single biggest gap between
+## this ground and the painted texture of the house references
 ## (assets/houses/) once those replaced the procedural house drawing:
 ## next to real material variation, one uniform green with speckle noise
 ## reads as flat. Each layer's colour is resolved once here (not per
 ## frame in _draw_ground) since setup() already reruns per resize.
+##
+## Started at four layers; two are gone on direct feedback since — a
+## sparse flower-accent layer (too eye-catching at the real render
+## scale), and a dirt/dry-grass patch layer (small brown/tan rects,
+## reported as visual clutter) — leaving grass blades and pebbles as the
+## two that read as texture rather than noise.
 func _build_ground_texture() -> void:
 	_ground_texture.clear()
 	var area: float = logical_w * ground_h
@@ -113,19 +119,6 @@ func _build_ground_texture() -> void:
 		_ground_texture.append({
 			"x": seeded(i * 3.1) * logical_w, "y": seeded(i * 7.7 + 1.0) * ground_h,
 			"w": 1.0, "h": 2.0 if tall else 1.0, "color": color,
-		})
-
-	var dirt_c: Color = Palette.c("dirt")
-	var dirt_dark_c: Color = Palette.c("dirtDark")
-	var dry_c: Color = Palette.c("grassDry")
-	var patch_n: int = int(round(area / 900.0))
-	for i in range(patch_n):
-		var s: float = i * 5.9 + 100.0
-		var pick: float = seeded(s + 1.0)
-		var color: Color = dirt_dark_c if pick > 0.66 else (dirt_c if pick > 0.33 else dry_c)
-		_ground_texture.append({
-			"x": seeded(s) * logical_w, "y": seeded(s + 2.0) * ground_h,
-			"w": 2.0 + seeded(s + 3.0) * 2.0, "h": 2.0 + seeded(s + 4.0) * 1.0, "color": color,
 		})
 
 	var pebble_light: Color = Palette.c("stoneLight")

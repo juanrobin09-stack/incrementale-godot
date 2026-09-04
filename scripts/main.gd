@@ -79,7 +79,11 @@ func _ready() -> void:
 	add_child(_chaos_tree)
 
 	GameState.offline_progress_applied.connect(_on_offline_progress)
-	GameState.apply_offline_progress()
+	# Offline gains disabled on request ("pour l'instant" — may come back
+	# later): just not calling apply_offline_progress() here. Everything
+	# it needs (game_state.gd's own logic, this signal connection, the
+	# modal below) is left intact so re-enabling is this one line back.
+	# GameState.apply_offline_progress()
 
 func _process(_delta: float) -> void:
 	_caption_label.text = GameState.get_scene_caption()

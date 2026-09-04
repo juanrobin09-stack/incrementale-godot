@@ -31,6 +31,13 @@ const TIERS := {
 # ---------------------------------------------------------------------------
 # Disasters
 # ---------------------------------------------------------------------------
+# Capped on request: each disaster's level (rain/wind/storm/flood, "les
+# compétences") now stops at 15 rather than climbing forever — a deliberate
+# early ceiling, not a balance tweak derived from the visual-stage curve
+# below (max_visual_stage/levels_per_stage already caps each disaster's
+# damage art well before level 15 on its own).
+const MAX_DISASTER_LEVEL := 15
+
 const DISASTERS := {
 	"rain": {
 		"id": "rain", "name": "Pluie", "icon": "🌧️", "tier": "village",

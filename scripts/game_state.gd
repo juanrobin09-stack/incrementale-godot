@@ -390,6 +390,8 @@ func purchase_disaster(id: String) -> bool:
 	var st: Dictionary = state.disasters[id]
 	if not st["unlocked"]:
 		return false
+	if st["level"] >= GameData.MAX_DISASTER_LEVEL:
+		return false
 	var cost := get_disaster_cost(id)
 	if state.chaos < cost:
 		return false

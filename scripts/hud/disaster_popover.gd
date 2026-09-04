@@ -61,14 +61,18 @@ func _refresh() -> void:
 
 	_button_buy.visible = true
 	var production := GameState.get_disaster_production(_current_id)
-	var cost := GameState.get_disaster_cost(_current_id)
 	_label_stats.text = "Niveau %d — +%.1f Chaos/s" % [st["level"], production]
 
-	var can_afford: bool = GameState.state.chaos >= cost
-	_button_buy.disabled = not can_afford
-	var label: String = "Activer" if st["level"] == 0 else "Améliorer"
-	var cost_label: String = "Gratuit" if cost == 0 else "%d Chaos" % cost
-	_button_buy.text = "%s — %s" % [label, cost_label]
+	if st["level"] >= GameData.MAX_DISASTER_LEVEL:
+		_button_buy.disabled = true
+		_button_buy.text = "Niveau max"
+	else:
+		var cost := GameState.get_disaster_cost(_current_id)
+		var can_afford: bool = GameState.state.chaos >= cost
+		_button_buy.disabled = not can_afford
+		var label: String = "Activer" if st["level"] == 0 else "Améliorer"
+		var cost_label: String = "Gratuit" if cost == 0 else "%d Chaos" % cost
+		_button_buy.text = "%s — %s" % [label, cost_label]
 
 func _describe_unlock(cond: Variant) -> String:
 	var parts: PackedStringArray = []

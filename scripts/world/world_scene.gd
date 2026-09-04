@@ -102,11 +102,43 @@ extends Node2D
 ## canvas edges) — nearly 3x wider, at the same height, than the old
 ## procedural approximation. Kept at fx=0.90 it clipped off the right
 ## edge on portrait/narrow viewports and overlapped the blue/purple
-## houses; confirmed by computing every house's and the windmill's real
-## rect (same formula _add_houses() uses) across a wide battery of
-## resolutions (390x844 up to 3440x1440, plus square and tall-phone
-## ratios). (fx=0.76, fy=0.54, h=u*0.30) is the largest footprint found
-## clear of all 5 houses and the screen edges across that whole set.
+## houses; (fx=0.76, fy=0.54, h=u*0.30) was the first fix, picked as the
+## largest static footprint clear of all 5 houses and the screen edges
+## across a wide battery of resolutions (390x844 up to 3440x1440, plus
+## square and tall-phone ratios).
+##
+## Reported directly as still much too small. Re-running that same
+## static search with a bigger target size (rather than eyeballing one
+## bigger guess) found its ceiling barely above the shipped 0.30 once
+## checked against houses' real, already-resolved positions
+## (_resolve_house_positions can and does move them off their curated
+## fx/fy) — any single fx/fy/height fixed enough to clear every tested
+## aspect ratio at once was only ever marginally bigger. That's the same
+## shape of problem trees already had (see class header above), and the
+## same fix applies: stop hunting for one static spot that happens to
+## work everywhere, and instead give the windmill a real, meaningfully
+## bigger target size at a curated "home" position, then push it
+## horizontally clear of whatever houses it would otherwise overlap —
+## _clear_windmill_of_houses, the same interval-merge idea as trees'
+## _clear_of_rects, but not a straight reuse of that function: it tests
+## the mover's anchor point against a rect's span grown by its own
+## radius in both directions, which only reads correctly for a mover
+## whose reach above its own base is roughly the same order as its
+## radius (true for a tree canopy, false for the windmill — several
+## times taller than it is wide) — this does a real mover-height-vs-
+## house-rect vertical overlap test instead, so it doesn't flag houses
+## the windmill's actual silhouette could never reach.
+##
+## (fx=0.82, fy=0.64, h=u*0.40) is the new curated home position — h up
+## from u*0.30, fy pushed deeper to match (keeps the windmill's top edge
+## roughly where it already was instead of climbing into the houses' own
+## row as it grows). Verified clear, with zero push needed, across every
+## ordinary landscape aspect ratio in that same battery. Same disclosed
+## limitation as trees: a handful of narrow portrait ratios in that
+## battery have no fully clear spot for a structure this size at all
+## (checked directly) — WINDMILL_MAX_PUSH_MUL and the final on-screen
+## clamp keep the result bounded there instead of broken, the same trade
+## this file already makes for trees rather than a new one.
 
 var entities: Node2D
 var _wind: WindEngine
@@ -142,7 +174,7 @@ func build(logical_w: float, logical_h: float) -> void:
 	add_child(entities)
 
 	var house_rects: Array = _add_houses(gx, gy, u)
-	var windmill_rect: Rect2 = _add_windmill(gx, gy, u)
+	var windmill_rect: Rect2 = _add_windmill(gx, gy, u, house_rects)
 	_add_trees(gx, gy, u, house_rects + [windmill_rect])
 	_add_decor(gx, gy, ground_h, u)
 
@@ -279,10 +311,16 @@ func _resolve_house_positions(defs: Array, sizes: Array, gx: Callable, gy: Calla
 ## than a third attempt, the windmill stays exactly what the provided
 ## reference art shows, the same footing every house's sprite is already
 ## on.
-func _add_windmill(gx: Callable, gy: Callable, u: float) -> Rect2:
-	var h_mill: float = u * 0.30
+const WINDMILL_HOUSE_MARGIN := 6.0
+const WINDMILL_MAX_PUSH_MUL := 3.0
+
+func _add_windmill(gx: Callable, gy: Callable, u: float, house_rects: Array) -> Rect2:
+	var h_mill: float = u * 0.40
 	var w_mill: float = h_mill * (float(WINDMILL_TEXTURE.get_width()) / float(WINDMILL_TEXTURE.get_height()))
-	var pos := Vector2(gx.call(0.76), gy.call(0.54))
+	var screen_x0: float = gx.call(0.0)
+	var screen_x1: float = gx.call(1.0)
+	var pos := Vector2(gx.call(0.82), gy.call(0.64))
+	pos = _clear_windmill_of_houses(pos, w_mill / 2.0, h_mill, house_rects, screen_x0, screen_x1)
 
 	var mill := HouseSprite.new()
 	mill.position = pos
@@ -295,6 +333,68 @@ func _add_windmill(gx: Callable, gy: Callable, u: float) -> Rect2:
 	entities.add_child(mill)
 
 	return Rect2(pos.x - w_mill / 2.0, pos.y - h_mill, w_mill, h_mill)
+
+## Same interval-merge escape as _clear_of_rects (below, for trees) — merge
+## every blocking house's grown horizontal span at once and escape past the
+## outer edge of whichever merged span currently contains the windmill —
+## but not a straight reuse of that function. _clear_of_rects tests the
+## mover's own anchor point against each rect's vertical span grown by
+## `radius` in *both* directions, which only reads correctly when the
+## mover's reach above its own base is roughly the same order of magnitude
+## as its radius — true for a tree canopy, false here: the windmill is
+## several times taller than it is wide, so that test would either miss
+## houses its actual silhouette does reach (radius far smaller than height)
+## or flag houses it could never reach at all — tried first, and confirmed
+## exactly that: houses more than a screen-width away still came back
+## "blocking". This does the real check instead: the mover's own vertical
+## extent, from `height` above `pos.y` down to `pos.y` itself, against
+## each house rect's vertical extent, both grown by WINDMILL_HOUSE_MARGIN
+## only (no radius folded in vertically). WINDMILL_MAX_PUSH_MUL and the
+## final on-screen clamp mirror
+## TREE_MAX_PUSH_MUL's own reasoning: this village is dense enough that a
+## few narrow aspect ratios have no fully clear spot for a structure this
+## size at all, so a bounded best-effort beats an unbounded chase.
+func _clear_windmill_of_houses(pos: Vector2, half_w: float, height: float, house_rects: Array, screen_x0: float, screen_x1: float) -> Vector2:
+	var p: Vector2 = pos
+	var max_push: float = half_w * WINDMILL_MAX_PUSH_MUL
+	for _iter in range(8):
+		var intervals: Array = []
+		for rect in house_rects:
+			var r: Rect2 = rect
+			var gy0: float = r.position.y - WINDMILL_HOUSE_MARGIN
+			var gy1: float = r.position.y + r.size.y + WINDMILL_HOUSE_MARGIN
+			if gy0 <= p.y and p.y - height <= gy1:
+				var gx0: float = r.position.x - half_w - WINDMILL_HOUSE_MARGIN
+				var gx1: float = r.position.x + r.size.x + half_w + WINDMILL_HOUSE_MARGIN
+				intervals.append(Vector2(gx0, gx1))
+		if intervals.is_empty():
+			break
+		intervals.sort_custom(func(a, b): return a.x < b.x)
+		var merged: Array = [intervals[0]]
+		for i in range(1, intervals.size()):
+			var iv: Vector2 = intervals[i]
+			var last: Vector2 = merged[merged.size() - 1]
+			if iv.x <= last.y:
+				merged[merged.size() - 1] = Vector2(last.x, max(last.y, iv.y))
+			else:
+				merged.append(iv)
+		var found_blocking: bool = false
+		var blocking: Vector2 = Vector2.ZERO
+		for iv in merged:
+			if iv.x <= p.x and p.x <= iv.y:
+				blocking = iv
+				found_blocking = true
+				break
+		if not found_blocking:
+			break
+		var target_x: float = blocking.x - 0.5 if (p.x - blocking.x <= blocking.y - p.x) else blocking.y + 0.5
+		if abs(target_x - pos.x) > max_push:
+			target_x = pos.x + max_push * (1.0 if target_x > pos.x else -1.0)
+		if is_equal_approx(target_x, p.x):
+			break
+		p = Vector2(target_x, p.y)
+	p.x = clamp(p.x, screen_x0 - half_w * 0.7, screen_x1 + half_w * 0.7)
+	return p
 
 ## house_rects: exact destination rects from _add_houses(), already
 ## resolved against each other — trees are kept clear of these AND of
@@ -330,13 +430,23 @@ const TREE_MAX_PUSH_MUL := 6.0
 ## a row of trees standing a little further forward than the houses
 ## rather than tucked directly beside them; flagged here since it's a
 ## real, visible layout change, not just a bugfix.
+##
+## The first pass at this (all 4 within a narrow 0.32-0.45 band) reads
+## as fine individually but visibly bunched together as a group once
+## resolved — reported directly. Spread further apart (0.24-0.50) for
+## real depth variety instead: re-checked the same way, and this spread
+## happens to leave every one of the 7 ordinary aspect ratios already
+## tested fully clear with no push needed at all, not just bounded —
+## tighter clustering was never required for collision safety, only an
+## artefact of how the previous values were picked one at a time instead
+## of considered together.
 func _add_trees(gx: Callable, gy: Callable, u: float, house_rects: Array) -> void:
 	var defs := [
-		{"fx": 0.145, "fy": 0.32, "type": "round", "width": u * 0.11, "height": u * 0.30, "flex": 1.1},
-		{"fx": 0.30, "fy": 0.32, "type": "round", "width": u * 0.09, "height": u * 0.24, "flex": 1.2},
-		{"fx": 0.70, "fy": 0.45, "type": "round", "width": u * 0.105, "height": u * 0.28, "flex": 1.0},
-		{"fx": 0.865, "fy": 0.40, "type": "round", "width": u * 0.095, "height": u * 0.25, "flex": 1.15},
-		{"fx": 0.015, "fy": 0.42, "type": "round", "width": u * 0.135, "height": u * 0.35, "flex": 0.9},
+		{"fx": 0.145, "fy": 0.30, "type": "round", "width": u * 0.11, "height": u * 0.30, "flex": 1.1},
+		{"fx": 0.30, "fy": 0.24, "type": "round", "width": u * 0.09, "height": u * 0.24, "flex": 1.2},
+		{"fx": 0.70, "fy": 0.38, "type": "round", "width": u * 0.105, "height": u * 0.28, "flex": 1.0},
+		{"fx": 0.865, "fy": 0.50, "type": "round", "width": u * 0.095, "height": u * 0.25, "flex": 1.15},
+		{"fx": 0.015, "fy": 0.44, "type": "round", "width": u * 0.135, "height": u * 0.35, "flex": 0.9},
 	]
 	var screen_x0: float = gx.call(0.0)
 	var screen_x1: float = gx.call(1.0)
