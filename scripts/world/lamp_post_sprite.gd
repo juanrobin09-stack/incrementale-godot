@@ -28,13 +28,11 @@ func setup(p_h: float) -> void:
 func _draw() -> void:
 	var iron: Color = Palette.c("lampIron")
 	var iron_lit: Color = Palette.c("lampIronLit")
-	var stone_c: Color = Palette.c("stone")
 	var stone_dark_c: Color = Palette.c("stoneDark")
 	var glow: Color = Palette.c("windowGlow")
 
 	# Stone base.
 	px_rect(-3, -3, 6, 3, stone_dark_c)
-	px_rect(-2, -4, 4, 1, stone_c)
 
 	# Pole — a highlight strip down one side instead of one flat tone,
 	# plus two banded collars.
