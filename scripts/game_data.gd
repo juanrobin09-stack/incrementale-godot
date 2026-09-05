@@ -141,7 +141,15 @@ const OBJECTIVES := [
 # with flood_* purchases just has that stray data ignored on next load —
 # the load_game() merge in game_state.gd only ever copies a saved node's
 # state for ids that still exist here, by design, already.
-const BRANCH_ANGLES := {"wind": 0, "rain": -90, "storm": 90}
+#
+# The 3 survivors were also explicitly rotated 90° rather than left at
+# their old angles with a gap where flood's slot (180°, left) used to
+# be: rain -90→180, wind 0→-90, storm 90→0 — each of the 4 original
+# compass slots keeps exactly one branch except the vacated one, which
+# lands at 90° (bottom) instead of 180° (left). Specified explicitly,
+# arm by arm ("le haut va à gauche, la droite va en haut, le bas va à
+# droite"), not chosen freely.
+const BRANCH_ANGLES := {"wind": -90, "rain": 180, "storm": 0}
 
 const UPGRADE_TREE := {
 	"core": {

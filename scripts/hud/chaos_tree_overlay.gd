@@ -20,12 +20,16 @@ extends Control
 ## cloud on the rain arm, spark/lightning on storm, rock/brick on flood,
 ## leaf/gust/tornado on wind) that keeping them was better than
 ## replacing a working, readable glyph with a shape this engine has no
-## way to paint. The layout itself needed no change at all: BRANCH_ANGLES
-## (0/-90/90/180 for wind/rain/storm/flood) already put the tree on
-## exactly the cross the reference shows, entirely by coincidence of
-## values chosen for the original web version — confirmed by reading
-## the reference's per-arm icons against UPGRADE_TREE's before touching
-## anything, not assumed.
+## way to paint. The layout itself needed no change at this point:
+## BRANCH_ANGLES (0/-90/90/180 for wind/rain/storm/flood, at the time)
+## already put the tree on exactly the cross the reference shows,
+## entirely by coincidence of values chosen for the original web
+## version — confirmed by reading the reference's per-arm icons against
+## UPGRADE_TREE's before touching anything, not assumed. The flood arm
+## and its angle are gone since — see BRANCH_ANGLES' own header in
+## game_data.gd for that removal and the explicit rotation applied to
+## the 3 that remain, rather than restating current values here where
+## they'd only drift out of sync with that one source of truth again.
 ##
 ## One deliberate, disclosed deviation: the reference's 3rd header
 ## button reads as a padlock, but this overlay has no lock-view feature
