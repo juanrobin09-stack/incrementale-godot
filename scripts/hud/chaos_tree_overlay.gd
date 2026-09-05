@@ -68,22 +68,29 @@ extends Control
 ## one representative unlocked tile reused for every non-core, non-locked
 ## node regardless of its own baked-in icon, since the reference has no
 ## spare unlocked node whose art is actually meant to be generic), plus
-## background.png (a clean stone-wall swatch, tiled), title_icon.png (the
-## header's spiral mark) and corner_sparkle.png (one accent reused at all
-## 4 corners, the reference only shows this decoration once per corner
-## anyway). These are StyleBoxTexture fills now, not StyleBoxFlat colour —
-## see _tile_style(). Per-node emoji glyphs are still drawn on top of
-## node_frame.png for everything except core/locked (those two states'
-## textures already have their one-and-only icon baked in, so their emoji
-## is cleared instead of doubling up) — the emoji were never the
-## complaint, only the flat frame around them was, and this engine still
-## has no way to paint 20-odd distinct custom icons from nothing. Header
-## buttons and the inspector's buy button keep the drawn-bevel
-## TreeNodeButton treatment from the previous pass rather than reusing
-## node_frame.png too — that tile's own baked-in pebble icon fighting
-## with a −/+/⌖/✕ glyph in the same small square read worse in a quick
-## check than the plain bevel already did, and nothing about those
-## buttons was reported as a problem.
+## background.png (a clean stone-wall swatch, tiled) and title_icon.png
+## (the header's spiral mark). The three node tiles are StyleBoxTexture
+## fills now, not StyleBoxFlat colour — see _tile_style(); background.png
+## and title_icon.png are plain TextureRect, since neither backs a Button.
+## Per-node emoji glyphs are still drawn on top of node_frame.png for
+## everything except core/locked (those two states' textures already have
+## their one-and-only icon baked in, so their emoji is cleared instead of
+## doubling up) — the emoji were never the complaint, only the flat frame
+## around them was, and this engine still has no way to paint 20-odd
+## distinct custom icons from nothing. Header buttons and the inspector's
+## buy button keep the drawn-bevel TreeNodeButton treatment from the
+## previous pass rather than reusing node_frame.png too — that tile's own
+## baked-in pebble icon fighting with a −/+/⌖/✕ glyph in the same small
+## square read worse in a quick check than the plain bevel already did,
+## and nothing about those buttons was reported as a problem.
+##
+## A 4th crop (corner_sparkle.png) was tried too, for the reference's own
+## corner accents — removed on direct feedback once actually seen in
+## game (screenshot attached): reported as a "gemme" to take back out
+## rather than keep, unlike everything else from this same pass. The
+## unused texture file itself was deleted along with the code drawing it,
+## not just unreferenced, since nothing else in this scene has any use
+## for it.
 
 const TREE_RADIUS_STEP := 150.0
 const TREE_CANVAS_SIZE := 2000.0
@@ -102,7 +109,6 @@ const NODE_FRAME_TEX := preload("res://assets/chaos_tree/node_frame.png")
 const NODE_CORE_TEX := preload("res://assets/chaos_tree/node_core.png")
 const BACKGROUND_TEX := preload("res://assets/chaos_tree/background.png")
 const TITLE_ICON_TEX := preload("res://assets/chaos_tree/title_icon.png")
-const CORNER_SPARKLE_TEX := preload("res://assets/chaos_tree/corner_sparkle.png")
 const TEX_MARGIN := 10
 
 # ---------------------------------------------------------------------------
@@ -172,44 +178,6 @@ func _ready() -> void:
 	_build_inspector(root_vbox)
 
 	_build_nodes()
-	_build_corner_sparkles()
-
-## The reference's own corner decoration (corner_sparkle.png, one crop
-## reused at all 4 corners — see class header), purely decorative,
-## anchored directly to `self` rather than the margined content column so
-## it sits at the true screen corners.
-func _build_corner_sparkles() -> void:
-	var box_size := 32.0
-	var inset := 8.0
-	# Each entry pins a box_size x box_size square to one corner via a zero-size anchor
-	# point (anchor_left==anchor_right, anchor_top==anchor_bottom) plus all
-	# four offsets set explicitly — same reasoning as UiUtil.fill_parent's
-	# own header: a Control's unset offsets don't reliably default to
-	# "zero size at this point", so left to imply the box from a single
-	# offset each corner would size (and sign) itself differently, and
-	# left/right corners silently ended up with negative width until this
-	# was written out in full instead.
-	var corners := [
-		{"ax": 0.0, "ay": 0.0, "l": inset, "t": inset},
-		{"ax": 1.0, "ay": 0.0, "l": -inset - box_size, "t": inset},
-		{"ax": 0.0, "ay": 1.0, "l": inset, "t": -inset - box_size},
-		{"ax": 1.0, "ay": 1.0, "l": -inset - box_size, "t": -inset - box_size},
-	]
-	for c in corners:
-		var spark := TextureRect.new()
-		spark.texture = CORNER_SPARKLE_TEX
-		spark.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		spark.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		spark.anchor_left = c["ax"]
-		spark.anchor_right = c["ax"]
-		spark.anchor_top = c["ay"]
-		spark.anchor_bottom = c["ay"]
-		spark.offset_left = c["l"]
-		spark.offset_right = c["l"] + box_size
-		spark.offset_top = c["t"]
-		spark.offset_bottom = c["t"] + box_size
-		spark.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		add_child(spark)
 
 ## Flat StyleBoxFlat standing in for a carved-stone panel — see class
 ## header for why this is a colour/border approximation rather than an
