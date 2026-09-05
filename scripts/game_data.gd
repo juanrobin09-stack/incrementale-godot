@@ -130,7 +130,18 @@ const OBJECTIVES := [
 # optionally gates a node on the underlying disaster being unlocked (no
 # point boosting a disaster you don't have yet). `coming_soon` nodes are
 # permanently unpurchasable in V1 — they exist to preview future tiers.
-const BRANCH_ANGLES := {"wind": 0, "rain": -90, "storm": 90, "flood": 180}
+#
+# The flood branch (angle 180, left wing) was removed on request — the
+# Chaos Tree's own layout only, not the "flood" disaster itself (still
+# fully defined in DISASTERS below, still reachable from the dock/
+# popover, its own unlock/objective untouched). ChaosTreeOverlay and
+# game_state.gd's tree-purchase logic both already iterate from this
+# const as their source of truth (confirmed before removing anything,
+# not assumed) rather than from any saved state, so an existing save
+# with flood_* purchases just has that stray data ignored on next load —
+# the load_game() merge in game_state.gd only ever copies a saved node's
+# state for ids that still exist here, by design, already.
+const BRANCH_ANGLES := {"wind": 0, "rain": -90, "storm": 90}
 
 const UPGRADE_TREE := {
 	"core": {
@@ -171,15 +182,4 @@ const UPGRADE_TREE := {
 		"description": "Les éclairs frappent plus souvent et plus fort.", "effect": {"type": "disaster_production_mult", "target": "storm", "value": 0.14}, "lightning_boost": true},
 	"storm_5": {"id": "storm_5", "name": "Cyclone", "icon": "🌀", "branch": "storm", "depth": 5, "cost": null, "requires": ["storm_4"], "coming_soon": true,
 		"description": "Une tempête électrique dévastatrice. Débarquera dans une future mise à jour."},
-
-	"flood_1": {"id": "flood_1", "name": "Ruisseau agité", "icon": "〰️", "branch": "flood", "depth": 1, "cost": 5, "requires": ["core"], "requires_disaster": "flood",
-		"description": "Le petit cours d'eau du village s'agite un peu plus.", "effect": {"type": "disaster_production_mult", "target": "flood", "value": 0.08}},
-	"flood_2": {"id": "flood_2", "name": "Berges fragiles", "icon": "🪨", "branch": "flood", "depth": 2, "cost": 15, "requires": ["flood_1"],
-		"description": "La terre des berges commence à céder.", "effect": {"type": "disaster_production_mult", "target": "flood", "value": 0.08}},
-	"flood_3": {"id": "flood_3", "name": "Crue montante", "icon": "🌊", "branch": "flood", "depth": 3, "cost": 40, "requires": ["flood_2"],
-		"description": "Le niveau de l'eau grimpe visiblement.", "effect": {"type": "disaster_production_mult", "target": "flood", "value": 0.08}},
-	"flood_4": {"id": "flood_4", "name": "Rupture de digue", "icon": "🧱", "branch": "flood", "depth": 4, "cost": 100, "requires": ["flood_3"],
-		"description": "Les rares protections du village menacent de céder.", "effect": {"type": "disaster_production_mult", "target": "flood", "value": 0.14}},
-	"flood_5": {"id": "flood_5", "name": "Inondation", "icon": "🌊", "branch": "flood", "depth": 5, "cost": null, "requires": ["flood_4"], "coming_soon": true,
-		"description": "Une inondation majeure engloutira bien plus que la berge. Débarquera dans une future mise à jour."},
 }
