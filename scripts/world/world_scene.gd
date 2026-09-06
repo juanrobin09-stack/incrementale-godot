@@ -163,6 +163,27 @@ extends Node2D
 ## list _add_trees() resolves against, for the same reason the road
 ## itself just had to be added above: any real footprint a tree could
 ## otherwise spawn inside belongs in that one list.
+##
+## Flagged as still not quite right after that, at a couple of dense
+## aspect ratios specifically: a tree grazing the windmill. Root cause
+## wasn't the well/road addition itself but something both exposed —
+## _add_trees() ran _clear_of_rects() then _clear_of_circles() exactly
+## once each per tree, and the second has no notion of the fixed rects
+## at all, so it could push a tree straight back into one rects had just
+## cleared it from. Confirmed (small Python port of both functions,
+## same battery of resolutions) to be a genuine back-and-forth between
+## one specific pair of points, not slow convergence — more alternating
+## passes alone never settle it, only rects running last, unconditionally,
+## does. See _add_trees()'s own loop for the fix and why "close to
+## another tree's canopy" is the right thing to end up on instead of
+## "inside a building" when both can't be satisfied at once. That same
+## check also surfaced a couple of narrow-portrait ratios where a tree
+## already can't reach any fully clear spot at all within
+## TREE_MAX_PUSH_MUL's own budget (see this header's own tree section
+## above) — pre-existing and unrelated to this fix; letting rects win
+## just stops circles from silently overriding that into a position
+## that only looked clear by chance, at those same already-imperfect
+## ratios, rather than actually being any more clear than before.
 
 var entities: Node2D
 var _wind: WindEngine
@@ -539,8 +560,40 @@ func _add_trees(gx: Callable, gy: Callable, u: float, house_rects: Array) -> voi
 		var d = defs[i]
 		var canopy_r: float = float(d["width"]) * TREE_CANOPY_R_MUL
 		var pos: Vector2 = Vector2(gx.call(d["fx"]), gy.call(d["fy"]))
+		# Alternated, and always finished on a rects pass, rather than run
+		# once each: clearing the placed-tree circles has no notion of the
+		# fixed rects and can push a tree straight back into one that
+		# _clear_of_rects had just resolved it out of — confirmed directly
+		# (reported: a tree still grazing the windmill at a couple of dense
+		# aspect ratios), and confirmed to be a genuine back-and-forth, not
+		# slow convergence: at the exact reported spot, rects sends the
+		# tree to one point, circles sends it right back past the other,
+		# forever, so more alternating passes alone never settle it — only
+		# rects running LAST, unconditionally, does, and it's the right
+		# tiebreaker: ending up a bit close to another tree's canopy (soft,
+		# barely visible) beats ending up inside a building (hard, obvious).
+		# Simulated this exact loop in Python across this file's usual
+		# battery before writing it here, not just against the one reported
+		# case — every tree that could reach a spot clear of every fixed
+		# rect within TREE_MAX_PUSH_MUL now does, same as _clear_of_rects
+		# was already documented to guarantee on its own. The only
+		# still-imperfect cases the same check turned up are pre-existing
+		# and unrelated to this fix: a couple of narrow-portrait ratios
+		# already documented above (class header, TREE_MAX_PUSH_MUL) as
+		# having no fully clear spot for a given tree AT ALL — there,
+		# _clear_of_rects itself already settles short of fully clear
+		# once its own push cap is hit, with or without this loop; letting
+		# rects win here just stops that from being silently overridden
+		# by circles into a position that happened to look clear of rects
+		# purely by chance, at those exact same already-imperfect ratios,
+		# rather than actually being any more clear.
+		for _pass in range(3):
+			pos = _clear_of_rects(pos, canopy_r, house_rects, screen_x0, screen_x1)
+			var before_circles: Vector2 = pos
+			pos = _clear_of_circles(pos, canopy_r, placed)
+			if pos.is_equal_approx(before_circles):
+				break
 		pos = _clear_of_rects(pos, canopy_r, house_rects, screen_x0, screen_x1)
-		pos = _clear_of_circles(pos, canopy_r, placed)
 
 		var tree := TreeSprite.new()
 		tree.position = pos
