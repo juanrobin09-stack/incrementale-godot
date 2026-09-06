@@ -134,9 +134,8 @@ func _build_ground_texture() -> void:
 
 
 ## Sparse worn/pebble detail scattered across the road's own area —
-## positions stored relative to (road_x - road_w/2, ground_top) so they
-## stay put regardless of the edge jitter _draw_road() applies around
-## them (see _road_edge_offset).
+## positions stored relative to (road_x - road_w/2, ground_top), same
+## origin _draw_road() itself now draws the (straight) road from.
 func _build_road_texture() -> void:
 	_road_texture.clear()
 	var area: float = road_w * ground_h
@@ -286,23 +285,15 @@ func _draw_ground(storm_shade: float) -> void:
 	for d in _ground_texture:
 		px_rect(d["x"], ground_top + d["y"], d["w"], d["h"], d["color"])
 
-## Smooth, low-amplitude wavy offset for one road edge at a given y —
-## a sum of two incommensurate sine waves (same idea as WindEngine's
-## force curve) rather than per-strip random jitter, so the edge reads
-## as one continuous wandering line instead of a jagged/noisy one.
-## side_seed offsets phase between the two edges so the road's width
-## itself subtly breathes instead of both edges snaking in lockstep —
-## a straight-sided rectangle was the clearest "this is a UI shape, not
-## a place" tell once the houses became real reference art.
-func _road_edge_offset(y: float, side_seed: float) -> float:
-	var t: float = y / max(1.0, ground_h)
-	# A single low frequency (under half a cycle across the visible road)
-	# at a small amplitude — a first pass summed two faster sines and
-	# read as a kinked/broken line rather than a road, not the gentle
-	# meander it was going for.
-	var wave: float = sin(t * 2.2 + side_seed)
-	return wave * road_w * 0.045
-
+## Reported directly as needing to be straight — a wavy-edge version
+## (edges offset by independent out-of-phase sine waves) was tried
+## first, meant to read as a worn dirt path rather than a UI rectangle,
+## but with each edge wandering independently the road's own centreline
+## drifted left/right down the screen instead of just roughing up its
+## edges. Removed rather than tuned down: both edges are now the fixed
+## `road_x ± road_w / 2.0`, a straight vertical strip; the grass-tuft
+## edge detail and dirt/pebble texture below are untouched, since those
+## were never the complaint.
 func _draw_road() -> void:
 	var h: float = ground_h
 	var dirt_c: Color = Palette.c("dirt")
@@ -311,15 +302,15 @@ func _draw_road() -> void:
 	var grass_edge_c: Color = Palette.c("grassDark")
 	var grass_edge_c2: Color = Palette.c("grassShadow")
 
+	var left_x: float = road_x - road_w / 2.0
+	var right_x: float = road_x + road_w / 2.0
+	px_rect(left_x, ground_top, right_x - left_x, h, dirt_c)
+	px_rect(left_x, ground_top, 1, h, dirt_dark_c)
+	px_rect(right_x - 1, ground_top, 1, h, dirt_dark_c)
+
 	var step: float = 3.0
 	var y: float = 0.0
 	while y < h:
-		var sh: float = min(step, h - y)
-		var left_x: float = road_x - road_w / 2.0 + _road_edge_offset(y, 0.0)
-		var right_x: float = road_x + road_w / 2.0 + _road_edge_offset(y, 7.3)
-		px_rect(left_x, ground_top + y, right_x - left_x, sh, dirt_c)
-		px_rect(left_x, ground_top + y, 1, sh, dirt_dark_c)
-		px_rect(right_x - 1, ground_top + y, 1, sh, dirt_dark_c)
 		# Grass tufts encroaching from the edges — sparse and seeded, not
 		# every strip, so they read as occasional weeds, not a border.
 		if seeded(y * 0.37 + 40.0) > 0.72:
@@ -328,11 +319,10 @@ func _draw_road() -> void:
 			px_rect(right_x + seeded(y * 0.59) * 1.0, ground_top + y, 1, 1, grass_edge_c if seeded(y * 0.23) > 0.5 else grass_edge_c2)
 		y += step
 
-	# Worn centre path, wandering gently with the road rather than
-	# staying perfectly straight against now-wavy edges.
+	# Worn centre path, straight down the middle.
 	y = 0.0
 	while y < h:
-		px_rect(road_x - 1 + _road_edge_offset(y, 3.5) * 0.3, ground_top + y, 2, 4, dirt_light_c)
+		px_rect(road_x - 1, ground_top + y, 2, 4, dirt_light_c)
 		y += 10
 
 	for d in _road_texture:

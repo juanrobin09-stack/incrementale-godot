@@ -139,6 +139,20 @@ extends Node2D
 ## (checked directly) — WINDMILL_MAX_PUSH_MUL and the final on-screen
 ## clamp keep the result bounded there instead of broken, the same trade
 ## this file already makes for trees rather than a new one.
+##
+## Reported directly: a tree standing in the middle of the road. Every
+## rect this file ever taught _clear_of_rects/_add_trees about was a
+## house or the windmill — the road itself was never one of them, despite
+## being drawn (BackgroundLayer._draw_road()) as a fixed obstacle-shaped
+## strip right through the ground band a tree's curated fx/fy can land
+## in just as easily as a house's footprint. Fixed the same way every
+## other obstacle here is handled — as one more Rect2 in the array
+## _add_trees() already resolves against, not a special case: `road_rect`
+## spans the full ground band at (road_x ± road_w/2), built once in
+## build() from the same road_x/road_w passed to BackgroundLayer.setup(),
+## and joins house_rects/windmill_rect in the list _add_trees() receives.
+## No change needed inside _clear_of_rects itself — it was already generic
+## over "any rect", the road was just never in the list it saw.
 
 var entities: Node2D
 var _wind: WindEngine
@@ -173,9 +187,10 @@ func build(logical_w: float, logical_h: float) -> void:
 	entities.y_sort_enabled = true
 	add_child(entities)
 
+	var road_rect := Rect2(road_x - road_w / 2.0, ground_top, road_w, ground_h)
 	var house_rects: Array = _add_houses(gx, gy, u)
 	var windmill_rect: Rect2 = _add_windmill(gx, gy, u, house_rects)
-	_add_trees(gx, gy, u, house_rects + [windmill_rect])
+	_add_trees(gx, gy, u, house_rects + [windmill_rect, road_rect])
 	_add_decor(gx, gy, ground_h, u)
 
 	var weather := WeatherLayer.new()
