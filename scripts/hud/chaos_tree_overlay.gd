@@ -95,6 +95,27 @@ extends Control
 ## unused texture file itself was deleted along with the code drawing it,
 ## not just unreferenced, since nothing else in this scene has any use
 ## for it.
+##
+## Reported later, screenshot attached, as a problem specifically on the
+## core node: a short line stub dangling below it, connected to nothing.
+## Root cause, found by inspecting node_core.png's actual pixels rather
+## than guessing — the reference screenshot this tile was cropped from
+## still had all 4 original branches (wind/rain/storm/flood) wired to the
+## core, so all 4 of the reference's own connector lines touching the
+## core's frame got baked into the crop as static pixels, one short stub
+## per edge. Three of the four happened to still line up with a surviving
+## branch after the later removal/rotation (see game_data.gd), reading as
+## a harmless (if slightly redundant, next to this overlay's own
+## dynamically-drawn TreeLinesLayer connectors) doubled-up line end; the
+## 4th — the reference's original down-arm, now the vacated slot no branch
+## occupies — had nothing left to connect to, which is what got reported.
+## Fixed at the source: all 4 baked-in stubs painted out of node_core.png
+## with a clean patch sampled from the same tile's own untouched corner
+## background, leaving the carved-stone frame and spiral untouched and
+## connectivity solely down to the dynamic lines, same as node_frame.png/
+## node_locked.png (checked — neither had this problem, since a generic
+## mid-branch tile was cropped from a spot with at most one line touching
+## it, unlike the one-and-only core).
 
 const TREE_RADIUS_STEP := 150.0
 const TREE_CANVAS_SIZE := 2000.0
