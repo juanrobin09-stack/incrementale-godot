@@ -153,6 +153,16 @@ extends Node2D
 ## and joins house_rects/windmill_rect in the list _add_trees() receives.
 ## No change needed inside _clear_of_rects itself — it was already generic
 ## over "any rect", the road was just never in the list it saw.
+##
+## The well (_add_well) is the newest structure built this same way, real
+## reference art (assets/well/) provided directly as an intact/damaged
+## pair — see that function's own header for the full reasoning (why it
+## reuses HouseSprite's complete crack/collapse behaviour rather than
+## just its texture, tier/colour choices, and how its home position was
+## found). Its rect joins house_rects/windmill_rect/road_rect in the same
+## list _add_trees() resolves against, for the same reason the road
+## itself just had to be added above: any real footprint a tree could
+## otherwise spawn inside belongs in that one list.
 
 var entities: Node2D
 var _wind: WindEngine
@@ -190,7 +200,8 @@ func build(logical_w: float, logical_h: float) -> void:
 	var road_rect := Rect2(road_x - road_w / 2.0, ground_top, road_w, ground_h)
 	var house_rects: Array = _add_houses(gx, gy, u)
 	var windmill_rect: Rect2 = _add_windmill(gx, gy, u, house_rects)
-	_add_trees(gx, gy, u, house_rects + [windmill_rect, road_rect])
+	var well_rect: Rect2 = _add_well(gx, gy, u, house_rects)
+	_add_trees(gx, gy, u, house_rects + [windmill_rect, road_rect, well_rect])
 	_add_decor(gx, gy, ground_h, u)
 
 	var weather := WeatherLayer.new()
@@ -232,6 +243,8 @@ const HOUSE_TEXTURES_DAMAGED := {
 }
 const WINDMILL_TEXTURE := preload("res://assets/windmill/windmill.png")
 const WINDMILL_TEXTURE_DAMAGED := preload("res://assets/windmill/windmill_damaged.png")
+const WELL_TEXTURE := preload("res://assets/well/well.png")
+const WELL_TEXTURE_DAMAGED := preload("res://assets/well/well_damaged.png")
 
 ## Returns each house's exact destination rect (post-overlap-resolution)
 ## so _add_trees() can keep trees out of them — see the class header for
@@ -411,6 +424,62 @@ func _clear_windmill_of_houses(pos: Vector2, half_w: float, height: float, house
 	p.x = clamp(p.x, screen_x0 - half_w * 0.7, screen_x1 + half_w * 0.7)
 	return p
 
+## Same HouseSprite reuse as the windmill (see its own header for why that
+## class has nothing house-specific baked in) and, per direct request, the
+## same full behaviour too — not just the real texture: this well can
+## crack under wind stress and eventually collapse for good, exactly like
+## a house, rather than staying an indestructible decoration. The two
+## reference images (assets/well/) uploaded directly are an intact/
+## damaged pair in exactly the same shape as a house's own two textures —
+## confirmed before writing any code (visually compared: one has a lit
+## lantern, flowers, an upright barrel and a clean stone ring; the other
+## has none of that plus a visible crack through the stone), not assumed
+## from the filenames, which were meaningless upload artifacts (renamed
+## here to well.png/well_damaged.png).
+##
+## size_tier 0 (small): a well is smaller than even the smallest house, so
+## it gets that tier's quicker, roof-only partial collapse rather than the
+## bigger houses'/windmill's staggered multi-piece one. "wall"/"roof"
+## colours reuse existing Palette entries rather than inventing well-
+## specific ones — Palette.c("stone")/("stoneDark") already tint the
+## windmill's own stone base, and Palette.c("roofRed")/("roofRedShadow")
+## is what the old procedural well already used for its own roof, so both
+## choices continue what this project already picked for this exact
+## structure rather than picking arbitrarily.
+##
+## Height (u*0.20) and home position (fx=0.59, fy=0.46) are a fresh
+## search, not the old procedural well's own tiny fx=0.565/fy=0.30 spot —
+## checked directly (same static-search approach as the windmill/trees)
+## that the OLD spot, at this real structure's actual size, overlaps a
+## house at every resolution in this file's usual test battery; fx=0.59/
+## fy=0.46 was the first found with zero overlap at every one of those
+## resolutions AND clear of the lamp post/bushes' own fx by a margin,
+## rather than the first spot that merely happens to survive the push.
+## _clear_windmill_of_houses reused as-is for the push itself (already
+## generic rect-vs-rect despite the name — see its own header) as a
+## defence-in-depth measure now that the search found a home spot needing
+## none, the same reasoning that already applies to every other structure
+## in this file.
+func _add_well(gx: Callable, gy: Callable, u: float, house_rects: Array) -> Rect2:
+	var h_well: float = u * 0.20
+	var w_well: float = h_well * (float(WELL_TEXTURE.get_width()) / float(WELL_TEXTURE.get_height()))
+	var screen_x0: float = gx.call(0.0)
+	var screen_x1: float = gx.call(1.0)
+	var pos := Vector2(gx.call(0.59), gy.call(0.46))
+	pos = _clear_windmill_of_houses(pos, w_well / 2.0, h_well, house_rects, screen_x0, screen_x1)
+
+	var well := HouseSprite.new()
+	well.position = pos
+	well.setup(
+		h_well, WELL_TEXTURE, WELL_TEXTURE_DAMAGED,
+		Palette.c("stone"), Palette.c("stoneDark"),
+		Palette.c("roofRed"), Palette.c("roofRedShadow"),
+		0.75 + _seeded(6 * 9.1) * 0.6, 6 * 4.1 + 3.0, _wind, entities, 0,
+	)
+	entities.add_child(well)
+
+	return Rect2(pos.x - w_well / 2.0, pos.y - h_well, w_well, h_well)
+
 ## house_rects: exact destination rects from _add_houses(), already
 ## resolved against each other — trees are kept clear of these AND of
 ## each other (see class header). TREE_CANOPY_R_MUL is generous on
@@ -566,11 +635,6 @@ func _clear_of_circles(pos: Vector2, radius: float, placed: Array) -> Vector2:
 	return p
 
 func _add_decor(gx: Callable, gy: Callable, ground_h: float, u: float) -> void:
-	var well := WellSprite.new()
-	well.position = Vector2(gx.call(0.565), gy.call(0.30))
-	well.setup(max(4.0, u * 0.032))
-	entities.add_child(well)
-
 	var fence := FenceSprite.new()
 	fence.position = Vector2(gx.call(0.02), gy.call(0.52))
 	fence.setup(u * 0.24, _wind)
