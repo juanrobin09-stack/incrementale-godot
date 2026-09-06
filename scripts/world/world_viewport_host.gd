@@ -35,6 +35,17 @@ func _ready() -> void:
 	_texture_rect.texture = _sub_viewport.get_texture()
 	add_child(_texture_rect)
 
+	# build() only otherwise reruns on a resize (see _process() below) —
+	# without this, a level-up mid-session (the village's last structure
+	# reaching "ruined" — see game_state.gd's notify_structure_ruined())
+	# would leave the OLD, now-irrelevant fully-ruined village on screen
+	# until the player happened to resize the window. Forcing _last_size
+	# back to ZERO makes the very next _process() tick see the current
+	# display size as "changed" and rebuild through the exact same path a
+	# real resize already takes, rather than a second, parallel rebuild
+	# call site.
+	GameState.level_changed.connect(func(_new_level: int): _last_size = Vector2.ZERO)
+
 # _last_size starts at ZERO precisely so the first call here (whatever
 # frame `size` actually resolves to something real — see the same
 # Container-timing lesson from the Chaos Tree viewport) always counts

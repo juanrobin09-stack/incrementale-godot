@@ -97,6 +97,17 @@ extends PixelDrawer
 ## resilience / no-respawn / no-recovery-from-collapse behaviour is
 ## unchanged — see tree_sprite.gd's own header for the "no respawn"
 ## product decision this follows.
+##
+## `ruined` (signal) + setup()'s start_ruined param added for the level-2
+## unlock (world_scene.gd/game_state.gd): this class's own "ruined" state
+## was always permanent for as long as the node lived, but had no way to
+## outlive it — a fresh setup() always started "intact", so a village
+## fully wrecked one session quietly came back on the next rebuild (a
+## resize, a reload). GameState is where that permanence now actually
+## survives; this class only reports the moment it happens (once, via the
+## signal) and can be told to start already there (start_ruined) — no
+## save-system access added here, on purpose, same separation of concerns
+## every other autoload-vs-sprite boundary in this project already keeps.
 
 const GRID_COLS := 5
 const GRID_ROWS := 6
@@ -111,6 +122,19 @@ const COLLAPSE_TRIGGER := 0.95
 ## Only a fraction of the non-reserved fine cells are even eligible to
 ## dissolve at all; see _fine_threshold.
 const CRACK_KEEP_FRACTION := 0.7
+
+## Fired exactly once, the instant _state first reaches "ruined" — see
+## _finish_collapse(). world_scene.gd listens for this on every
+## destructible structure it creates and forwards it to
+## GameState.notify_structure_ruined(), which is what actually persists
+## the fact permanently (this class has no save-system access of its own,
+## by design — see the class header's "no respawn" note two paragraphs
+## up: the permanence itself was already this class's job, being able to
+## SURVIVE a reload is a level above it). Never fired for a structure that
+## starts already ruined (see setup()'s start_ruined param) — that path
+## restores a fact GameState already recorded, not a new one for it to
+## learn.
+signal ruined
 
 var h: float
 var texture: Texture2D
@@ -151,7 +175,7 @@ var _seq_events: Array = []
 var _seq_shake_x: float = 0.0
 
 func setup(p_h: float, p_texture: Texture2D, p_texture_damaged: Texture2D, p_wall: Color, p_wall_shadow: Color, p_roof: Color, p_roof_shadow: Color,
-		p_resilience: float, p_seed: float, p_wind: WindEngine, p_entities_parent: Node2D, p_size_tier: int = 1) -> void:
+		p_resilience: float, p_seed: float, p_wind: WindEngine, p_entities_parent: Node2D, p_size_tier: int = 1, p_start_ruined: bool = false) -> void:
 	h = p_h
 	texture = p_texture
 	texture_damaged = p_texture_damaged
@@ -208,6 +232,27 @@ func setup(p_h: float, p_texture: Texture2D, p_texture_damaged: Texture2D, p_wal
 			var macro_col: int = clamp(int((float(fx) + 0.5) / _fine_cols * GRID_COLS), 0, GRID_COLS - 1)
 			var macro_row: int = clamp(int((float(fy) + 0.5) / _fine_rows * GRID_ROWS), 0, GRID_ROWS - 1)
 			_fine_reserved[fy * _fine_cols + fx] = _reserved_lookup.has(macro_row * GRID_COLS + macro_col)
+
+	# Restoring a structure GameState already recorded as ruined in an
+	# earlier session — jump straight to the terminal "ruined" composite
+	# (every fine + reserved-macro cell blitted, same as _finish_collapse()
+	# leaves behind) rather than replaying the ~2s collapse sequence on
+	# every rebuild (a resize, a fresh load). Reuses the exact same blit
+	# calls "intact" and "collapsing" already use, just run once, up
+	# front, for all of them at once — no new compositing path.
+	if p_start_ruined:
+		for fy in range(_fine_rows):
+			for fx in range(_fine_cols):
+				_fine_revealed[fy * _fine_cols + fx] = true
+				_blit_fine_cell(fx, fy)
+		for cell in _reserved_cells:
+			_blit_macro_cell(cell.x, cell.y)
+		if _composite_dirty:
+			_composite_texture.update(_composite_img)
+			_composite_dirty = false
+		_stress = 1.0
+		_last_stress = 1.0
+		_state = "ruined"
 
 	queue_redraw()
 
@@ -601,6 +646,7 @@ func _finish_collapse() -> void:
 	var wall_h: float = h * 0.42
 	DebrisSpawner.dust(entities_parent, position.x, position.y - wall_h * 0.15, 3.0, _w * 0.5, 1.3)
 	queue_redraw()
+	ruined.emit()
 
 ## Always the composite, "ruined" included — a first pass drew the RAW
 ## texture_damaged for "ruined" specifically, to guarantee the sprite

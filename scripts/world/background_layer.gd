@@ -18,6 +18,14 @@ extends PixelDrawer
 ## technique, no texture assets for this layer — see palette.gd's header
 ## for why: no image-generation tool available, so this had to stay
 ## procedural), just noticeably more of them and more color variety.
+##
+## setup_streets() (level 2's own street network — see world_scene.gd's
+## _build_level_2) is an ADDITIVE second path, not a generalisation of
+## road_x/road_w/_draw_road(): a town needs several streets in either
+## orientation (a main street plus cross streets, not one always-vertical
+## road), and level 1's own call site never touches it, so nothing about
+## the village's rendering changed by adding it. See setup_streets()'s own
+## header for the rest.
 
 var logical_w: float
 var logical_h: float
@@ -30,6 +38,16 @@ var wind: WindEngine
 var _ground_texture: Array = []
 var _road_texture: Array = []
 var _cloud_defs: Array = []
+
+## Level 2's own street network (see world_scene.gd's _build_level_2) —
+## a plain Array[Rect2] in the same absolute coordinates road_rect already
+## uses at the call site (ground_top folded into each rect's own .position.y,
+## nothing this class needs to offset). Empty for level 1, which keeps using
+## road_x/road_w/_draw_road() completely unchanged — see setup_streets()'s
+## own header for why this is an additive second path rather than a
+## generalisation of the single-road one.
+var streets: Array = []
+var _street_texture: Array = []
 
 func setup(p_w: float, p_h: float, p_ground_top: float, p_ground_h: float, p_road_x: float, p_road_w: float, p_wind: WindEngine) -> void:
 	logical_w = p_w
@@ -152,6 +170,45 @@ func _build_road_texture() -> void:
 			"w": 1.0 + seeded(s + 3.0), "h": 1.0, "color": color,
 		})
 
+## Called instead of (never alongside) relying on road_x/road_w, once,
+## right after setup() — a level-2-only addition, kept fully separate from
+## _draw_road()/_build_road_texture() rather than folding a street list
+## into those: level 1's call site (world_scene.gd's _build_level_1())
+## never calls this, so `streets` stays empty and _draw() takes the exact
+## same _draw_road() path it always has, unchanged. Each rect is drawn
+## edge-to-edge straight (see _draw_streets()) — no per-edge wave, the
+## same fix _draw_road() itself already got (see this file's own recent
+## history) rather than a regression reintroduced here for a second road
+## system.
+func setup_streets(p_streets: Array) -> void:
+	streets = p_streets
+	_build_street_texture()
+	queue_redraw()
+
+## Same pebble-scatter idea as _build_road_texture(), one seeded pass per
+## street rect instead of one shared road_w/ground_h area — each street's
+## own width/height stands in for road_w/ground_h in that same density
+## formula, and the seed offset per street (i*1000.0) keeps their pebbles
+## from lining up identically street to street.
+func _build_street_texture() -> void:
+	_street_texture.clear()
+	var stone_c: Color = Palette.c("stone")
+	var stone_dark_c: Color = Palette.c("stoneDark")
+	var dirt_light_c: Color = Palette.c("dirtLight")
+	for si in range(streets.size()):
+		var r: Rect2 = streets[si]
+		var area: float = r.size.x * r.size.y
+		var n: int = int(round(area / 75.0))
+		var base_seed: float = si * 1000.0 + 8000.0
+		for i in range(n):
+			var s: float = i * 4.3 + base_seed
+			var pick: float = seeded(s + 1.0)
+			var color: Color = stone_dark_c if pick > 0.75 else (stone_c if pick > 0.5 else dirt_light_c)
+			_street_texture.append({
+				"street": si, "x": seeded(s) * r.size.x, "y": seeded(s + 2.0) * r.size.y,
+				"w": 1.0 + seeded(s + 3.0), "h": 1.0, "color": color,
+			})
+
 func _process(delta: float) -> void:
 	_update_clouds(delta)
 	queue_redraw()
@@ -173,7 +230,10 @@ func _draw() -> void:
 	_draw_hills()
 	_draw_horizon_haze(storm_sky_t)
 	_draw_ground(storm_shade)
-	_draw_road()
+	if streets.is_empty():
+		_draw_road()
+	else:
+		_draw_streets()
 
 ## Four gradient stops now, not three (skyUpperAccent added on top of
 ## the original top/mid/horizon) — one more band of depth at the zenith,
@@ -324,6 +384,63 @@ func _draw_road() -> void:
 	while y < h:
 		px_rect(road_x - 1, ground_top + y, 2, 4, dirt_light_c)
 		y += 10
+
+## Level 2's street network — see setup_streets()'s own header for why
+## this is a parallel path rather than a generalisation of _draw_road().
+## Each rect is filled + dark-edged on all 4 sides (unlike _draw_road(),
+## a street can be either orientation — a horizontal cross-street is just
+## as common here as the one always-vertical village road was), with the
+## same grass-tuft-at-the-edge and worn-centre-line treatment, oriented
+## along whichever axis the rect is longer on rather than assumed
+## vertical.
+func _draw_streets() -> void:
+	var dirt_c: Color = Palette.c("dirt")
+	var dirt_dark_c: Color = Palette.c("dirtDark")
+	var dirt_light_c: Color = Palette.c("dirtLight")
+	var grass_edge_c: Color = Palette.c("grassDark")
+	var grass_edge_c2: Color = Palette.c("grassShadow")
+
+	for si in range(streets.size()):
+		var r: Rect2 = streets[si]
+		px_rect(r.position.x, r.position.y, r.size.x, r.size.y, dirt_c)
+		px_rect(r.position.x, r.position.y, r.size.x, 1, dirt_dark_c)
+		px_rect(r.position.x, r.position.y + r.size.y - 1, r.size.x, 1, dirt_dark_c)
+		px_rect(r.position.x, r.position.y, 1, r.size.y, dirt_dark_c)
+		px_rect(r.position.x + r.size.x - 1, r.position.y, 1, r.size.y, dirt_dark_c)
+
+		var vertical: bool = r.size.y >= r.size.x
+		var along: float = r.size.y if vertical else r.size.x
+		var base_seed: float = si * 1000.0 + 8000.0
+		var t: float = 0.0
+		while t < along:
+			var edge_a: float = seeded(base_seed + t * 0.37 + 40.0)
+			var edge_b: float = seeded(base_seed + t * 0.41 + 90.0)
+			if vertical:
+				if edge_a > 0.72:
+					px_rect(r.position.x - 1.0 - seeded(base_seed + t * 0.51) * 1.0, r.position.y + t, 1, 1, grass_edge_c if seeded(base_seed + t * 0.19) > 0.5 else grass_edge_c2)
+				if edge_b > 0.72:
+					px_rect(r.position.x + r.size.x + seeded(base_seed + t * 0.59) * 1.0, r.position.y + t, 1, 1, grass_edge_c if seeded(base_seed + t * 0.23) > 0.5 else grass_edge_c2)
+			else:
+				if edge_a > 0.72:
+					px_rect(r.position.x + t, r.position.y - 1.0 - seeded(base_seed + t * 0.51) * 1.0, 1, 1, grass_edge_c if seeded(base_seed + t * 0.19) > 0.5 else grass_edge_c2)
+				if edge_b > 0.72:
+					px_rect(r.position.x + t, r.position.y + r.size.y + seeded(base_seed + t * 0.59) * 1.0, 1, 1, grass_edge_c if seeded(base_seed + t * 0.23) > 0.5 else grass_edge_c2)
+			t += 3.0
+
+		var center_x: float = r.position.x + r.size.x / 2.0
+		var center_y: float = r.position.y + r.size.y / 2.0
+		var mid: float = 0.0
+		while mid < along:
+			if vertical:
+				px_rect(center_x - 1, r.position.y + mid, 2, 4, dirt_light_c)
+			else:
+				px_rect(r.position.x + mid, center_y - 1, 4, 2, dirt_light_c)
+			mid += 10
+
+		for d in _street_texture:
+			if d["street"] != si:
+				continue
+			px_rect(r.position.x + d["x"], r.position.y + d["y"], d["w"], d["h"], d["color"])
 
 	for d in _road_texture:
 		px_rect(road_x - road_w / 2.0 + d["x"], ground_top + d["y"], d["w"], d["h"], d["color"])

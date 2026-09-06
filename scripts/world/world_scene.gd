@@ -184,6 +184,29 @@ extends Node2D
 ## just stops circles from silently overriding that into a position
 ## that only looked clear by chance, at those same already-imperfect
 ## ratios, rather than actually being any more clear than before.
+##
+## LEVEL 2 — everything above this paragraph is level 1 (the village) and
+## is UNCHANGED: build() now only dispatches on GameState.state.level,
+## calling either _build_level_1() (the exact body build() always was) or
+## _build_level_2() (new — see that function's own header for the town's
+## design). The two levels share every reusable placement/avoidance
+## helper on this page (_clear_of_rects/_clear_of_circles/
+## _resolve_house_positions (now _resolve_positions_mutually underneath)/
+## _clear_windmill_of_houses) — only layout *data* differs per level, not
+## the geometry that resolves it.
+##
+## A level 1 structure (5 houses + windmill + well, TOTAL_LEVEL_1_
+## STRUCTURES) reaching HouseSprite's permanent "ruined" state now means
+## something beyond that one sprite: _wire_structure_ruin() forwards it to
+## GameState.notify_structure_ruined(), which flips state.level to 2 the
+## moment every one of them has been ruined at some point (not necessarily
+## in the same session — see that function's own header) — "le village
+## est entièrement détruit" made concrete as a real, checkable condition
+## rather than left implicit in the wind-stress numbers already driving
+## individual collapses. Level 2's own structures call the exact same
+## function (TOTAL_LEVEL_2_STRUCTURES) for forward-compatibility with a
+## level 3 that doesn't exist yet, not because anything currently listens
+## for level 2 being fully ruined too.
 
 var entities: Node2D
 var _wind: WindEngine
@@ -197,10 +220,22 @@ func _ready() -> void:
 	# once by WorldViewportHost), matching that.
 	_wind = WindEngine.new()
 
+## Dispatches on GameState.state.level rather than being level 1's build
+## logic directly — see this class's own header (level 2 section) for why
+## the split is a parallel _build_level_2() rather than parametrising this
+## one function over both: level 1's entire body below is untouched, byte
+## for byte, from before levels existed, so nothing about the village can
+## regress from adding a second destination.
 func build(logical_w: float, logical_h: float) -> void:
 	for child in get_children():
 		child.queue_free()
 
+	if GameState.state.level >= 2:
+		_build_level_2(logical_w, logical_h)
+	else:
+		_build_level_1(logical_w, logical_h)
+
+func _build_level_1(logical_w: float, logical_h: float) -> void:
 	var ground_top: float = logical_h * 0.34
 	var ground_h: float = logical_h - ground_top
 	var u: float = ground_h
@@ -228,6 +263,97 @@ func build(logical_w: float, logical_h: float) -> void:
 	var weather := WeatherLayer.new()
 	add_child(weather)
 	weather.setup(logical_w, logical_h, _wind)
+
+## Level 2: a small MEDIEVAL TOWN, not a bigger copy of the village — same
+## art direction (same PixelDrawer primitives, same Palette, same real-
+## texture HouseSprite treatment for every structure, same fractional
+## gx/gy layout approach), deliberately denser and more urban: a real
+## street network (one main street + two cross streets + a small plaza,
+## see _add_town_streets()) instead of one road, more buildings than the
+## village's 5 (see _add_town_buildings()), and its own two disasters
+## (quake/blight — TownHazardLayer, see that class's own header). Trees/
+## bushes/flowers are deliberately fewer and pushed to the periphery/plaza
+## edges rather than removed outright — explicit ask: "une ville, pas
+## tout recouvrir de pierre", the same reasoning that keeps grass as this
+## file's own base ground layer under the streets rather than paving the
+## whole band.
+##
+## Reuses every general-purpose helper level 1 already made reusable
+## (_clear_of_rects/_clear_of_circles for trees, _resolve_house_positions/
+## _clear_windmill_of_houses for structures) rather than duplicating that
+## geometry — only the *layout data* (defs arrays, street rects) is new,
+## same split already established between "reusable algorithm" and
+## "level-specific data" everywhere else in this file.
+##
+## Buildings reuse the SAME 5 house textures level 1 already has, on
+## purpose and temporarily: no reference art for level-2-specific
+## buildings exists yet (explicitly deferred — "les bâtiments seront
+## générés et intégrés séparément par la suite"), and this project has no
+## image-generation tool to invent some. TOWN_BUILDING_DEFS is exactly the
+## same shape _add_houses()'s own `defs` is (fx/fy/scale/roof/tier) so
+## swapping in real level-2 textures later is a data change to this one
+## array — new HOUSE_TEXTURES-style consts for the new art, new `roof`
+## keys in the defs below — not a rewrite of how buildings are placed,
+## sized, or made destructible.
+func _build_level_2(logical_w: float, logical_h: float) -> void:
+	var ground_top: float = logical_h * 0.34
+	var ground_h: float = logical_h - ground_top
+	var u: float = ground_h
+
+	var gx := func(f: float) -> float: return f * logical_w
+	var gy := func(f: float) -> float: return ground_top + f * ground_h
+
+	var background := BackgroundLayer.new()
+	add_child(background)
+	# road_x/road_w still passed (the main street's own span) even though
+	# setup_streets() below means _draw_road() is never actually reached
+	# — see BackgroundLayer's own header — kept meaningful rather than
+	# zeroed so nothing here relies on an unreachable branch's inputs
+	# being garbage.
+	var street_w: float = max(12.0, u * 0.16)
+	background.setup(logical_w, logical_h, ground_top, ground_h, gx.call(0.5), street_w, _wind)
+
+	var streets: Array = _add_town_streets(gx, gy, u, logical_w, ground_top, ground_h, street_w)
+	background.setup_streets(streets)
+
+	entities = Node2D.new()
+	entities.y_sort_enabled = true
+	add_child(entities)
+
+	var building_rects: Array = _add_town_buildings(gx, gy, u, streets)
+	var windmill_rect: Rect2 = _add_town_windmill(gx, gy, u, building_rects)
+	var well_rect: Rect2 = _add_town_well(gx, gy, u, building_rects)
+	var obstacles: Array = building_rects + streets + [windmill_rect, well_rect]
+	_add_town_trees(gx, gy, u, obstacles)
+	_add_town_decor(gx, gy, ground_h, u, streets)
+
+	var hazards := TownHazardLayer.new()
+	add_child(hazards)
+	hazards.setup(logical_w, logical_h, ground_top, ground_h, entities)
+
+	var weather := WeatherLayer.new()
+	add_child(weather)
+	weather.setup(logical_w, logical_h, _wind)
+
+## Main street straight down the middle (same fx=0.5 the village's own
+## road used) plus two horizontal cross streets and a small plaza rect at
+## the upper intersection — "une rue principale, plusieurs rues
+## secondaires, des intersections, une petite place" as asked, kept to a
+## handful of straight rects rather than a tile-based road network: cheap
+## to draw (BackgroundLayer.setup_streets(), same primitive fills as the
+## village's single road) and to reason about for placement (every one of
+## these is a plain Rect2 the same obstacle-avoidance helpers already
+## consume), which matters more for "une première base" than a fully
+## organic street layout would.
+func _add_town_streets(gx: Callable, gy: Callable, u: float, logical_w: float, ground_top: float, ground_h: float, street_w: float) -> Array:
+	var cross_h: float = max(10.0, u * 0.13)
+	var main_street := Rect2(gx.call(0.5) - street_w / 2.0, ground_top, street_w, ground_h)
+	var cross_top := Rect2(0.0, gy.call(0.24) - cross_h / 2.0, logical_w, cross_h)
+	var cross_bottom := Rect2(0.0, gy.call(0.66) - cross_h / 2.0, logical_w, cross_h)
+	var plaza_w: float = u * 0.36
+	var plaza_h: float = u * 0.24
+	var plaza := Rect2(gx.call(0.5) - plaza_w / 2.0, gy.call(0.24) - plaza_h / 2.0, plaza_w, plaza_h)
+	return [main_street, cross_top, cross_bottom, plaza]
 
 func _process(delta: float) -> void:
 	if _wind == null:
@@ -267,6 +393,39 @@ const WINDMILL_TEXTURE_DAMAGED := preload("res://assets/windmill/windmill_damage
 const WELL_TEXTURE := preload("res://assets/well/well.png")
 const WELL_TEXTURE_DAMAGED := preload("res://assets/well/well_damaged.png")
 
+## 5 houses + windmill + well — every HouseSprite-backed structure level 1
+## can ever have. Passed to notify_structure_ruined() alongside each
+## structure's own id (see _wire_structure()) so GameState knows when
+## every one of them has been ruined at least once and can advance
+## state.level — see game_state.gd's own header on that function for why
+## the count lives here (this file's own defs are the one source of truth
+## for "how many structures a level has") rather than duplicated as a
+## GameData constant.
+const TOTAL_LEVEL_1_STRUCTURES := 7
+## 8 town buildings + windmill + well — see _add_town_buildings()/
+## _add_town_windmill()/_add_town_well(). Ruining all of level 2's own
+## structures is already wired through the same notify_structure_ruined()
+## call every level-1 structure uses, but is currently inert (see
+## GameData.MAX_IMPLEMENTED_LEVEL's own header) until a level 3 exists.
+const TOTAL_LEVEL_2_STRUCTURES := 10
+
+## Shared by every level's structures (houses, windmill, well today;
+## level 2's own building slots below) — two things a HouseSprite always
+## needs from its owner once it exists as a persistent, save-tracked
+## structure rather than a fresh one every rebuild: (1) whether GameState
+## already recorded it ruined in an earlier session, checked BEFORE
+## setup() so that can be passed straight into start_ruined instead of
+## replaying a collapse that already happened; (2) a connection so the
+## FIRST time it newly reaches ruined this session, GameState hears about
+## it. `id` must be stable across rebuilds (a resize, a reload) — see each
+## call site for how it's built (level + a fixed per-slot name, never an
+## array index alone once ordering could ever change).
+func _structure_start_ruined(id: String) -> bool:
+	return GameState.is_structure_ruined(id)
+
+func _wire_structure_ruin(sprite: HouseSprite, id: String, level: int, total: int) -> void:
+	sprite.ruined.connect(func(): GameState.notify_structure_ruined(id, level, total))
+
 ## Returns each house's exact destination rect (post-overlap-resolution)
 ## so _add_trees() can keep trees out of them — see the class header for
 ## why this has to be the real rect, not just "trees far enough from the
@@ -293,6 +452,7 @@ func _add_houses(gx: Callable, gy: Callable, u: float) -> Array:
 		var d = defs[i]
 		var size: Vector2 = sizes[i]
 		var pos: Vector2 = positions[i]
+		var id: String = "l1_house_%d" % i
 
 		var house := HouseSprite.new()
 		house.position = pos
@@ -301,7 +461,9 @@ func _add_houses(gx: Callable, gy: Callable, u: float) -> Array:
 			Palette.c(d["wall"]), Palette.c(d["wall"] + "Shadow"),
 			Palette.c(d["roof"]), Palette.c(d["roof"] + "Shadow"),
 			0.75 + _seeded(i * 9.1) * 0.6, i * 4.1 + 3.0, _wind, entities, d["tier"],
+			_structure_start_ruined(id),
 		)
+		_wire_structure_ruin(house, id, 1, TOTAL_LEVEL_1_STRUCTURES)
 		entities.add_child(house)
 		house_rects.append(Rect2(pos.x - size.x / 2.0, pos.y - size.y, size.x, size.y))
 	return house_rects
@@ -318,7 +480,15 @@ func _resolve_house_positions(defs: Array, sizes: Array, gx: Callable, gy: Calla
 	var positions: Array = []
 	for d in defs:
 		positions.append(Vector2(gx.call(d["fx"]), gy.call(d["fy"])))
+	return _resolve_positions_mutually(positions, sizes)
 
+## The actual mutual-overlap resolution, pulled out of
+## _resolve_house_positions() so _add_town_buildings() can re-run it a 2nd
+## time on positions that already moved once (after being pushed clear of
+## the street grid) — the exact same "nudge any two overlapping rects
+## apart horizontally" logic either way, just no longer tied to deriving
+## its starting positions from defs/gx/gy specifically.
+func _resolve_positions_mutually(positions: Array, sizes: Array) -> Array:
 	for _iter in range(8):
 		var moved: bool = false
 		for i in range(positions.size()):
@@ -378,7 +548,9 @@ func _add_windmill(gx: Callable, gy: Callable, u: float, house_rects: Array) -> 
 		Palette.c("stone"), Palette.c("stoneDark"),
 		Palette.c("roofBlue"), Palette.c("roofBlueShadow"),
 		0.75 + _seeded(5 * 9.1) * 0.6, 5 * 4.1 + 3.0, _wind, entities, 2,
+		_structure_start_ruined("l1_windmill"),
 	)
+	_wire_structure_ruin(mill, "l1_windmill", 1, TOTAL_LEVEL_1_STRUCTURES)
 	entities.add_child(mill)
 
 	return Rect2(pos.x - w_mill / 2.0, pos.y - h_mill, w_mill, h_mill)
@@ -496,7 +668,9 @@ func _add_well(gx: Callable, gy: Callable, u: float, house_rects: Array) -> Rect
 		Palette.c("stone"), Palette.c("stoneDark"),
 		Palette.c("roofRed"), Palette.c("roofRedShadow"),
 		0.75 + _seeded(6 * 9.1) * 0.6, 6 * 4.1 + 3.0, _wind, entities, 0,
+		_structure_start_ruined("l1_well"),
 	)
+	_wire_structure_ruin(well, "l1_well", 1, TOTAL_LEVEL_1_STRUCTURES)
 	entities.add_child(well)
 
 	return Rect2(pos.x - w_well / 2.0, pos.y - h_well, w_well, h_well)
@@ -712,6 +886,248 @@ func _add_decor(gx: Callable, gy: Callable, ground_h: float, u: float) -> void:
 		flower.position = Vector2(gx.call(f["fx"]), gy.call(f["fy"]))
 		flower.setup(i * 7.0)
 		entities.add_child(flower)
+
+## Same shape as _add_houses()'s own `defs` (fx/fy/scale/roof/tier),
+## reusing the SAME 5 HOUSE_TEXTURES this file already has — see
+## _build_level_2()'s own header for why that's a deliberate, temporary
+## placeholder rather than a design choice.
+##
+## Row 1 (fy=0.07) sits clear of cross_top/the plaza the same way
+## _add_houses()'s own row already sits clear of the village's roofline —
+## even its tallest member's grown rect never reaches down as far as
+## cross_top's own band.
+##
+## Rows 2 and 3 (fy=0.55/0.97) are NOT the first draft (fy=0.46/0.80, near
+## the original houses' own scale). That draft "looked" clear of cross_top/
+## cross_bottom by the same "doesn't overlap in this file's own curated
+## numbers" reasoning this comment used to lean on here — but a Python port
+## of this exact placement (the same resolution battery used everywhere
+## else in this file) caught it flatly overlapping BOTH cross streets, at
+## every single resolution tested, not just a narrow few. cross_top/
+## cross_bottom are full-width rects (see _add_town_streets()), so a
+## building whose grown rect reaches into one can never actually be pushed
+## clear by _clear_windmill_of_houses()'s horizontal-only escape — there is
+## no direction to push a mover out of a span that already covers the
+## entire screen width. The push still ran every time and still reported
+## success by its own bookkeeping, but had nowhere to send these buildings
+## except toward its own max-push cap — which for several of them meant
+## landing most of the way off-screen (confirmed directly: one building's
+## rect at x0=-56 on a 300px-wide screen). That is a real, universal bug,
+## not the kind of narrow-aspect-ratio imperfection TREE_MAX_PUSH_MUL/
+## WINDMILL_MAX_PUSH_MUL already accept elsewhere in this file.
+##
+## Fixed by sizing to the actual gap instead of assuming one: row 2 sits at
+## fy=0.55 (within the ~0.29*u-tall strip between cross_top and
+## cross_bottom) with scale cut to ~0.55 so its worst-case height leaves
+## real margin on both sides; row 3 sits at fy=0.97 (base near the bottom
+## of the ground band, past cross_bottom) with scale cut to ~0.65 for the
+## same reason — both re-verified clear of both cross streets across the
+## same battery. This does shrink rows 2/3 noticeably versus row 1 (and
+## versus the first draft) — an acceptable cost specifically because every
+## one of these 8 buildings is itself a temporary placeholder (see
+## _build_level_2()'s header): getting the PLACEMENT system right matters
+## far more here than these exact, soon-to-be-replaced footprints. A few
+## thin-edge slivers remain at narrow portrait aspect ratios (a building
+## corner grazing the well/windmill by a handful of px) — that is the same
+## bounded, narrow-viewport trade already accepted throughout this file,
+## never the all-resolutions off-screen failure this replaces.
+const TOWN_BUILDING_DEFS := [
+	{"fx": 0.18, "fy": 0.07, "scale": 0.85, "roof": "roofRed", "wall": "wallCream", "tier": 0},
+	{"fx": 0.32, "fy": 0.07, "scale": 0.80, "roof": "roofGold", "wall": "wallSlate", "tier": 1},
+	{"fx": 0.68, "fy": 0.07, "scale": 0.82, "roof": "roofGreen", "wall": "wallSlate", "tier": 0},
+	{"fx": 0.82, "fy": 0.07, "scale": 0.88, "roof": "roofBlue", "wall": "wallCream", "tier": 2},
+	{"fx": 0.14, "fy": 0.55, "scale": 0.58, "roof": "roofPurple", "wall": "wallRose", "tier": 2},
+	{"fx": 0.86, "fy": 0.55, "scale": 0.52, "roof": "roofRed", "wall": "wallCream", "tier": 0},
+	{"fx": 0.28, "fy": 0.97, "scale": 0.65, "roof": "roofGold", "wall": "wallSlate", "tier": 1},
+	{"fx": 0.72, "fy": 0.97, "scale": 0.62, "roof": "roofGreen", "wall": "wallSlate", "tier": 0},
+]
+
+## Resolution order: buildings vs each other first (_resolve_house_
+## positions, already generic), then each building pushed clear of every
+## street rect (_clear_windmill_of_houses — a rect-vs-rect, base-anchored
+## push, the right shape for "a building must never straddle a street",
+## already generic despite the name — see its own header), then buildings
+## vs each other ONCE MORE since the street push can reintroduce an
+## overlap the first pass already resolved. Not the full alternate-until-
+## stable loop _add_trees() needed (that was chasing an exact reported
+## bug; nothing here has been reported yet) — two rounds is the same
+## proportionate, bounded effort _add_windmill()/_add_well() already
+## settled for rather than an unbounded search for a perfect layout.
+func _add_town_buildings(gx: Callable, gy: Callable, u: float, streets: Array) -> Array:
+	var defs := TOWN_BUILDING_DEFS
+	var sizes: Array = []
+	for d in defs:
+		var tex: Texture2D = HOUSE_TEXTURES[d["roof"]]
+		var h_building: float = u * 0.30 * d["scale"]
+		var w_building: float = h_building * (float(tex.get_width()) / float(tex.get_height()))
+		sizes.append(Vector2(w_building, h_building))
+
+	var positions: Array = _resolve_house_positions(defs, sizes, gx, gy)
+	var screen_x0: float = gx.call(0.0)
+	var screen_x1: float = gx.call(1.0)
+	for i in range(positions.size()):
+		positions[i] = _clear_windmill_of_houses(positions[i], sizes[i].x / 2.0, sizes[i].y, streets, screen_x0, screen_x1)
+	positions = _resolve_positions_mutually(positions, sizes)
+
+	var building_rects: Array = []
+	for i in range(defs.size()):
+		var d = defs[i]
+		var size: Vector2 = sizes[i]
+		var pos: Vector2 = positions[i]
+		var id: String = "l2_building_%d" % i
+
+		var building := HouseSprite.new()
+		building.position = pos
+		building.setup(
+			size.y, HOUSE_TEXTURES[d["roof"]], HOUSE_TEXTURES_DAMAGED[d["roof"]],
+			Palette.c(d["wall"]), Palette.c(d["wall"] + "Shadow"),
+			Palette.c(d["roof"]), Palette.c(d["roof"] + "Shadow"),
+			0.75 + _seeded(i * 9.1 + 500.0) * 0.6, i * 4.1 + 200.0, _wind, entities, d["tier"],
+			_structure_start_ruined(id),
+		)
+		_wire_structure_ruin(building, id, 2, TOTAL_LEVEL_2_STRUCTURES)
+		entities.add_child(building)
+		building_rects.append(Rect2(pos.x - size.x / 2.0, pos.y - size.y, size.x, size.y))
+	return building_rects
+
+## Same windmill reference art and same reuse rationale as level 1's own
+## _add_windmill() (see that function's header) — a small town on this
+## project's own established medieval-fantasy logic still plausibly has
+## one, kept at the outskirts rather than duplicated per-district.
+## Pushed clear of buildings only (not streets — its own footprint is
+## picked to sit past the town's own street grid already, at the edge of
+## the screen, the same "curated home position, pushed only as a safety
+## net" approach every structure in this file uses).
+func _add_town_windmill(gx: Callable, gy: Callable, u: float, building_rects: Array) -> Rect2:
+	var h_mill: float = u * 0.42
+	var w_mill: float = h_mill * (float(WINDMILL_TEXTURE.get_width()) / float(WINDMILL_TEXTURE.get_height()))
+	var screen_x0: float = gx.call(0.0)
+	var screen_x1: float = gx.call(1.0)
+	var pos := Vector2(gx.call(0.94), gy.call(0.90))
+	pos = _clear_windmill_of_houses(pos, w_mill / 2.0, h_mill, building_rects, screen_x0, screen_x1)
+
+	var mill := HouseSprite.new()
+	mill.position = pos
+	mill.setup(
+		h_mill, WINDMILL_TEXTURE, WINDMILL_TEXTURE_DAMAGED,
+		Palette.c("stone"), Palette.c("stoneDark"),
+		Palette.c("roofBlue"), Palette.c("roofBlueShadow"),
+		0.75 + _seeded(8 * 9.1 + 500.0) * 0.6, 8 * 4.1 + 200.0, _wind, entities, 2,
+		_structure_start_ruined("l2_windmill"),
+	)
+	_wire_structure_ruin(mill, "l2_windmill", 2, TOTAL_LEVEL_2_STRUCTURES)
+	entities.add_child(mill)
+	return Rect2(pos.x - w_mill / 2.0, pos.y - h_mill, w_mill, h_mill)
+
+## The well moves to the plaza — the one placement choice here that isn't
+## just "level 1's spot, pushed": a town's own well belongs at its public
+## square on this project's own established medieval-fantasy logic, not
+## tucked beside a building the way the village's single well was.
+func _add_town_well(gx: Callable, gy: Callable, u: float, building_rects: Array) -> Rect2:
+	var h_well: float = u * 0.18
+	var w_well: float = h_well * (float(WELL_TEXTURE.get_width()) / float(WELL_TEXTURE.get_height()))
+	var screen_x0: float = gx.call(0.0)
+	var screen_x1: float = gx.call(1.0)
+	var pos := Vector2(gx.call(0.5), gy.call(0.24))
+	pos = _clear_windmill_of_houses(pos, w_well / 2.0, h_well, building_rects, screen_x0, screen_x1)
+
+	var well := HouseSprite.new()
+	well.position = pos
+	well.setup(
+		h_well, WELL_TEXTURE, WELL_TEXTURE_DAMAGED,
+		Palette.c("stone"), Palette.c("stoneDark"),
+		Palette.c("roofRed"), Palette.c("roofRedShadow"),
+		0.75 + _seeded(9 * 9.1 + 500.0) * 0.6, 9 * 4.1 + 200.0, _wind, entities, 0,
+		_structure_start_ruined("l2_well"),
+	)
+	_wire_structure_ruin(well, "l2_well", 2, TOTAL_LEVEL_2_STRUCTURES)
+	entities.add_child(well)
+	return Rect2(pos.x - w_well / 2.0, pos.y - h_well, w_well, h_well)
+
+## Fewer, sparser trees than the village — explicit ask ("une ville, pas
+## tout recouvrir de pierre") without contradicting "plus dense/urbanisée"
+## elsewhere: 3 trees at the town's own periphery/plaza edge rather than
+## the village's 5 spread through it. Same avoidance helpers as
+## _add_trees(), unchanged — obstacles here already include streets
+## (Rect2s, same as road_rect always was) alongside buildings/windmill/
+## well, so a town tree can no more spawn in a street than a village one
+## can in the road.
+func _add_town_trees(gx: Callable, gy: Callable, u: float, obstacles: Array) -> void:
+	var defs := [
+		{"fx": 0.03, "fy": 0.30, "type": "round", "width": u * 0.10, "height": u * 0.27, "flex": 1.0},
+		{"fx": 0.97, "fy": 0.30, "type": "round", "width": u * 0.10, "height": u * 0.27, "flex": 1.1},
+		{"fx": 0.50, "fy": 0.24, "type": "round", "width": u * 0.075, "height": u * 0.20, "flex": 1.15},
+	]
+	var screen_x0: float = gx.call(0.0)
+	var screen_x1: float = gx.call(1.0)
+	var placed: Array = []
+	for i in range(defs.size()):
+		var d = defs[i]
+		var canopy_r: float = float(d["width"]) * TREE_CANOPY_R_MUL
+		var pos: Vector2 = Vector2(gx.call(d["fx"]), gy.call(d["fy"]))
+		for _pass in range(3):
+			pos = _clear_of_rects(pos, canopy_r, obstacles, screen_x0, screen_x1)
+			var before_circles: Vector2 = pos
+			pos = _clear_of_circles(pos, canopy_r, placed)
+			if pos.is_equal_approx(before_circles):
+				break
+		pos = _clear_of_rects(pos, canopy_r, obstacles, screen_x0, screen_x1)
+
+		var tree := TreeSprite.new()
+		tree.position = pos
+		tree.setup(d["type"], d["width"], d["height"], d["flex"], i * 3.7 + 300.0, _wind, entities)
+		entities.add_child(tree)
+		placed.append({"pos": pos, "r": canopy_r})
+
+## Denser street furniture than the village's own decor pass — more lamp
+## posts (one per street-facing corner near the plaza, matching "davantage
+## de lanternes"), a fence at the town's edge (echoing the village's own,
+## same reasoning: a settlement boundary marker), and a handful of
+## TownPropSprite barrels/crates/benches/a sign around the plaza — see
+## that class's own header for why these are procedural rather than real
+## reference art.
+func _add_town_decor(gx: Callable, gy: Callable, ground_h: float, u: float, streets: Array) -> void:
+	var fence := FenceSprite.new()
+	fence.position = Vector2(gx.call(0.02), gy.call(0.88))
+	fence.setup(u * 0.22, _wind)
+	entities.add_child(fence)
+
+	var lamp_defs := [
+		{"fx": 0.38, "fy": 0.24}, {"fx": 0.62, "fy": 0.24},
+		{"fx": 0.40, "fy": 0.66}, {"fx": 0.60, "fy": 0.66},
+	]
+	for l in lamp_defs:
+		var lamp := LampPostSprite.new()
+		lamp.position = Vector2(gx.call(l["fx"]), gy.call(l["fy"]))
+		lamp.setup(ground_h * 0.30)
+		entities.add_child(lamp)
+
+	var bush_defs := [{"fx": 0.06, "fy": 0.46}, {"fx": 0.94, "fy": 0.46}]
+	for b in bush_defs:
+		var bush := BushSprite.new()
+		bush.position = Vector2(gx.call(b["fx"]), gy.call(b["fy"]))
+		bush.setup(ground_h * 0.032, _wind)
+		entities.add_child(bush)
+
+	var flower_defs := [{"fx": 0.44, "fy": 0.30}, {"fx": 0.56, "fy": 0.18}]
+	for i in range(flower_defs.size()):
+		var f = flower_defs[i]
+		var flower := FlowerPatchSprite.new()
+		flower.position = Vector2(gx.call(f["fx"]), gy.call(f["fy"]))
+		flower.setup(i * 7.0 + 300.0)
+		entities.add_child(flower)
+
+	var prop_defs := [
+		{"kind": "barrel", "fx": 0.435, "fy": 0.28, "w": u * 0.045, "h": u * 0.07},
+		{"kind": "crate", "fx": 0.565, "fy": 0.29, "w": u * 0.05, "h": u * 0.05},
+		{"kind": "bench", "fx": 0.46, "fy": 0.20, "w": u * 0.09, "h": u * 0.03},
+		{"kind": "sign", "fx": 0.30, "fy": 0.62, "w": u * 0.05, "h": u * 0.10},
+	]
+	for p in prop_defs:
+		var prop := TownPropSprite.new()
+		prop.position = Vector2(gx.call(p["fx"]), gy.call(p["fy"]))
+		prop.setup(p["kind"], p["w"], p["h"])
+		entities.add_child(prop)
 
 ## Same formula as PixelDrawer.seeded() — duplicated rather than shared
 ## because WorldScene extends Node2D, not PixelDrawer (it does no

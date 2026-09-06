@@ -25,8 +25,29 @@ const KO_PER_UNLOCK := 5
 # ---------------------------------------------------------------------------
 const TIERS := {
 	"village": {"name": "Village", "icon": "🏘️", "order": 0},
-	# small_town, big_city, metropolis, region... will slot in here in later versions.
+	"small_town": {"name": "Petite ville", "icon": "🏙️", "order": 1},
+	# big_city, metropolis, region... will slot in here in later versions.
 }
+
+# ---------------------------------------------------------------------------
+# Levels
+# ---------------------------------------------------------------------------
+# A level is a whole world stage (its own WorldScene layout in
+# world_scene.gd) — coarser-grained than a tier, which up to now was only
+# ever inferred from the highest unlocked disaster (see get_current_tier_id()
+# in game_state.gd, unchanged in spirit but now level-driven instead of a
+# disaster-unlock heuristic, since that heuristic has nothing to say about
+# *world layout*, only about the economy). LEVEL_TIER_IDS is the one place
+# that maps a level number to which TIERS entry names it in the HUD.
+#
+# MAX_IMPLEMENTED_LEVEL gates GameState.notify_structure_ruined()'s
+# auto-advance: level 2's own destructible structures already report
+# themselves ruined the same way level 1's do (see world_scene.gd), so the
+# mechanism is exercised and ready, but nothing currently advances a fully
+# -ruined level 2 into a level 3 that doesn't exist yet. Bump this the same
+# day a level 3 layout actually ships, not before.
+const MAX_IMPLEMENTED_LEVEL := 2
+const LEVEL_TIER_IDS := {1: "village", 2: "small_town"}
 
 # ---------------------------------------------------------------------------
 # Disasters
@@ -75,6 +96,43 @@ const DISASTERS := {
 		"base_production": 18,
 		"max_visual_stage": 2, "levels_per_stage": 4,
 	},
+
+	# ---- Petite ville (niveau 2) --------------------------------------
+	# Carte blanche demandée explicitement pour ces deux-là : choisies pour
+	# diversifier au-delà de "encore un phénomène météo" (rain/wind/storm/
+	# flood couvrent déjà air/eau/ciel/électricité à eux quatre) plutôt que
+	# pour ajouter un 5e/6e effet de la même famille. "earth" est un danger
+	# structurel (le sol/les fondations) au lieu d'atmosphérique ; "arcane"
+	# est un danger magique qui prolonge directement le thème du jeu — le
+	# joueur incarne déjà "l'Éveil du Chaos" (voir UPGRADE_TREE.core plus
+	# bas), donc une corruption qui grandit avec le pouvoir accumulé est la
+	# même idée que le reste du jeu, pas un ajout hors-sujet. Justification
+	# narrative du "pourquoi seulement à partir de la ville" : une ville
+	# plus lourde et plus dense fragilise davantage ses fondations (quake)
+	# et concentre davantage la propre puissance chaotique du joueur en un
+	# seul endroit (blight) — deux raisons qu'un simple village isolé n'a
+	# pas. `unlock.level` (nouvelle clé, voir meets_unlock_condition dans
+	# game_state.gd) gate les deux sur le niveau 2 en plus de leurs propres
+	# seuils, pour qu'elles n'apparaissent jamais tant que le village n'est
+	# pas entièrement détruit.
+	"quake": {
+		"id": "quake", "name": "Secousses souterraines", "icon": "🕳️", "tier": "small_town",
+		"description": "Le poids de la ville réveille de vieilles galeries qui craquent sous les rues.",
+		"tags": ["earth"],
+		"unlock": {"level": 2},
+		"base_cost": 5500, "cost_growth": 1.17,
+		"base_production": 45,
+		"max_visual_stage": 3, "levels_per_stage": 4,
+	},
+	"blight": {
+		"id": "blight", "name": "Corruption runique", "icon": "🔮", "tier": "small_town",
+		"description": "Une lueur violette ronge peu à peu la pierre et le bois, portée par ton propre Chaos.",
+		"tags": ["arcane"],
+		"unlock": {"level": 2, "chaos": 40000, "disaster_level": {"id": "quake", "level": 5}},
+		"base_cost": 20000, "cost_growth": 1.18,
+		"base_production": 140,
+		"max_visual_stage": 3, "levels_per_stage": 4,
+	},
 }
 
 # The disaster dock (bottom-left panel, in the web version) intentionally
@@ -82,11 +140,32 @@ const DISASTERS := {
 # (Chaos Tree branch, objective, scene captions all keep working) but is
 # excluded from the dock display itself.
 const DOCK_DISASTER_IDS := ["rain", "wind", "storm"]
+# Level 2's own dock keeps every village disaster visible (their Chaos/s
+# never stops mattering just because the world moved on) and adds the two
+# new ones — nothing is ever removed from a dock once a level unlocks it,
+# only appended, matching how an incremental game's economy is meant to
+# keep compounding rather than reset per stage.
+const DOCK_DISASTER_IDS_LEVEL_2 := ["rain", "wind", "storm", "quake", "blight"]
 const DOCK_LOGOS := {
 	"rain": "res://assets/disasters/rain.png",
 	"wind": "res://assets/disasters/wind.png",
 	"storm": "res://assets/disasters/storm.png",
+	# quake/blight have no dock logo yet — no reference art exists for them
+	# (unlike rain/wind/storm's, provided directly) and this project has no
+	# image-generation tool to fabricate one from nothing (see palette.gd's
+	# own header for that same recurring constraint). disaster_dock.gd
+	# falls back to the disaster's emoji icon when an id has no entry here,
+	# rather than crashing on a missing load() path — real PNGs can slot in
+	# later exactly the way rain/wind/storm's already did, no other change
+	# needed.
 }
+
+## Dock roster for a given level — level 1 unchanged (DOCK_DISASTER_IDS
+## itself), level 2 the superset above. Centralised here rather than left
+## as an if/else in disaster_dock.gd so the *data* about what each level's
+## economy includes stays in this data layer, not the UI.
+func get_dock_disaster_ids(level: int) -> Array:
+	return DOCK_DISASTER_IDS_LEVEL_2 if level >= 2 else DOCK_DISASTER_IDS
 
 # ---------------------------------------------------------------------------
 # Synergies
@@ -97,6 +176,8 @@ const DOCK_LOGOS := {
 const SYNERGIES := [
 	{"id": "wind_rain", "source": "wind", "target": "rain", "per_level": 0.05,
 		"description": "Le vent intensifie la pluie"},
+	{"id": "quake_blight", "source": "quake", "target": "blight", "per_level": 0.05,
+		"description": "Les fissures libèrent une énergie que la corruption absorbe"},
 ]
 
 # ---------------------------------------------------------------------------
@@ -118,6 +199,12 @@ const OBJECTIVES := [
 		"condition": {"kind": "disaster_unlocked", "disaster": "storm"}},
 	{"id": "obj_unlock_flood", "text": "Débloquer la Montée des eaux",
 		"condition": {"kind": "disaster_unlocked", "disaster": "flood"}},
+	{"id": "obj_reach_level_2", "text": "Détruire entièrement le village",
+		"condition": {"kind": "level_gte", "value": 2}},
+	{"id": "obj_unlock_quake", "text": "Débloquer les Secousses souterraines",
+		"condition": {"kind": "disaster_unlocked", "disaster": "quake"}},
+	{"id": "obj_unlock_blight", "text": "Débloquer la Corruption runique",
+		"condition": {"kind": "disaster_unlocked", "disaster": "blight"}},
 ]
 
 # ---------------------------------------------------------------------------

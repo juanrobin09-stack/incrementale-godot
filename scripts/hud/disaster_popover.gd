@@ -76,6 +76,12 @@ func _refresh() -> void:
 
 func _describe_unlock(cond: Variant) -> String:
 	var parts: PackedStringArray = []
+	if cond.has("level"):
+		# Today this only ever reads 2 (quake/blight, gated on the village
+		# being entirely destroyed) — worded around what that actually
+		# means in-game rather than a raw level number, same as this
+		# label already avoids raw KO/chaos jargon nowhere else in the UI.
+		parts.append("le village entièrement détruit" if cond["level"] == 2 else "le niveau %d" % cond["level"])
 	if cond.has("chaos"):
 		parts.append("%d Chaos" % cond["chaos"])
 	if cond.has("disaster_level"):

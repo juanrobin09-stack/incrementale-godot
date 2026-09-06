@@ -20,6 +20,7 @@ signal disaster_unlocked(id: String)
 signal tree_node_purchased(id: String)
 signal offline_progress_applied(elapsed_sec: float, gained: float)
 signal game_reset
+signal level_changed(new_level: int)
 
 const SAVE_PATH := "user://incrementable_save_v1.json"
 
@@ -76,6 +77,20 @@ func create_default_state() -> Dictionary:
 		"objectives": objectives,
 		"settings": {"sound_enabled": false},
 		"last_save_time": Time.get_unix_time_from_system(),
+		# Which world level is currently active (see world_scene.gd's
+		# _build_level_1()/_build_level_2()) — 1 (village) until the
+		# village's own structures are all ruined (see
+		# notify_structure_ruined()). ruined_structures is a permanent,
+		# one-way record of which individual structures (by the stable id
+		# world_scene.gd assigns each one) have reached HouseSprite's
+		# "ruined" state at least once — needed because that state itself
+		# lives only on the live HouseSprite node and is NOT otherwise
+		# persisted, so without this a village fully destroyed one session
+		# would quietly rebuild intact next time build() reruns (a resize,
+		# a reload) — the opposite of the "never rebuilds once truly
+		# collapsed" guarantee this project already makes for houses.
+		"level": 1,
+		"ruined_structures": {},
 	}
 
 func load_game() -> void:
@@ -142,6 +157,14 @@ func load_game() -> void:
 	if saved_settings.has("sound_enabled"):
 		merged.settings.sound_enabled = bool(saved_settings.sound_enabled)
 
+	if saved.has("level"):
+		merged.level = int(saved.level)
+	merged.ruined_structures = {}
+	var saved_ruined = saved.get("ruined_structures", {})
+	if typeof(saved_ruined) == TYPE_DICTIONARY:
+		for id in saved_ruined:
+			merged.ruined_structures[id] = true
+
 	state = merged
 
 func save_game() -> void:
@@ -164,6 +187,8 @@ func do_reset() -> void:
 func meets_unlock_condition(cond) -> bool:
 	if cond == null:
 		return true
+	if cond.has("level") and state.level < cond["level"]:
+		return false
 	if cond.has("chaos") and state.total_chaos_earned < cond["chaos"]:
 		return false
 	if cond.has("disaster_level"):
@@ -241,18 +266,18 @@ func count_unlocked_disasters() -> int:
 			count += 1
 	return count
 
+## Level-driven, not inferred from unlocked disasters — before levels
+## existed, "which tier name to show" had no explicit source of truth of
+## its own, so it borrowed the highest-order tier among already-unlocked
+## disasters as a stand-in. That heuristic said nothing about *world
+## layout* (which is what a tier/level actually changes now — see
+## world_scene.gd's _build_level_1()/_build_level_2()), and could in
+## principle drift from it — level 2's own quake unlocks the instant
+## state.level reaches 2 in practice (see notify_structure_ruined()), but
+## nothing guaranteed that ordering in general. GameData.LEVEL_TIER_IDS is
+## the direct, single source of truth instead.
 func get_current_tier_id() -> String:
-	var best_id := "village"
-	var best_order := -1
-	for id in GameData.DISASTERS:
-		if not state.disasters[id]["unlocked"]:
-			continue
-		var tier_id: String = GameData.DISASTERS[id]["tier"]
-		var order: int = GameData.TIERS[tier_id]["order"] if GameData.TIERS.has(tier_id) else 0
-		if order >= best_order:
-			best_order = order
-			best_id = tier_id
-	return best_id
+	return GameData.LEVEL_TIER_IDS.get(state.level, "village")
 
 func get_current_tier_name() -> String:
 	var tier_id := get_current_tier_id()
@@ -266,6 +291,53 @@ func has_lightning_boost() -> bool:
 		if GameData.UPGRADE_TREE[id].get("lightning_boost", false) and state.tree[id]["purchased"]:
 			return true
 	return false
+
+# ---------------------------------------------------------------------------
+# Levels & structure destruction
+# ---------------------------------------------------------------------------
+## Whether `id` (a stable id world_scene.gd assigns each destructible
+## structure — see its own header) has permanently reached HouseSprite's
+## "ruined" state at least once. Read by world_scene.gd when (re)building a
+## level, to instantiate an already-ruined structure straight into that
+## state (see HouseSprite.setup()'s start_ruined param) instead of
+## replaying a fresh collapse it already went through in an earlier
+## session.
+func is_structure_ruined(id: String) -> bool:
+	return state.ruined_structures.get(id, false)
+
+## Called once by world_scene.gd the instant a structure's HouseSprite
+## fires its own `ruined` signal for the first time. `level` is which
+## level that structure belongs to and `total_structures` is how many
+## destructible structures that level has in total (world_scene.gd's own
+## count — see TOTAL_LEVEL_1_STRUCTURES/TOTAL_LEVEL_2_STRUCTURES there;
+## deliberately not duplicated as a second source of truth here).
+##
+## Auto-advances state.level to level+1 the moment every one of that
+## level's structures has been ruined at some point (not necessarily all
+## in the same session — ruined_structures accumulates permanently across
+## saves) — but only while `level` is still the CURRENT level and a next
+## one actually exists (GameData.MAX_IMPLEMENTED_LEVEL): level 2's own
+## structures already call this exactly the same way level 1's do (see
+## world_scene.gd), so the mechanism is exercised end-to-end today, but
+## fully ruining level 2 is inert until a level 3 layout ships and this
+## constant moves — not a half-built feature, a deliberately future one.
+func notify_structure_ruined(id: String, level: int, total_structures: int) -> void:
+	if state.ruined_structures.get(id, false):
+		return
+	state.ruined_structures[id] = true
+
+	if state.level == level and level < GameData.MAX_IMPLEMENTED_LEVEL:
+		var ruined_here := 0
+		for ruined_id in state.ruined_structures:
+			if str(ruined_id).begins_with("l%d_" % level):
+				ruined_here += 1
+		if ruined_here >= total_structures:
+			state.level = level + 1
+			level_changed.emit(state.level)
+			check_unlocks()
+
+	state_changed.emit()
+	save_game()
 
 # ---------------------------------------------------------------------------
 # Village scene — visual stage per disaster (the actual drawing belongs
@@ -287,8 +359,34 @@ func get_scene_stages() -> Dictionary:
 		"flood": compute_stage("flood"),
 	}
 
+## Level 1's own captions are untouched (same conditions, same strings,
+## checked before anything level-specific) — this only adds a level 2
+## branch on top, read first so a town in the middle of a quake/blight
+## isn't described as if it were still the calm village. "ville"
+## replaces "village" throughout for the same reason get_current_tier_name
+## now says "Petite ville" once state.level reaches 2: the caption is the
+## other place a player reads the world's own name back.
 func get_scene_caption() -> String:
 	var stages := get_scene_stages()
+	if state.level >= 2:
+		var quake_stage := compute_stage("quake")
+		var blight_stage := compute_stage("blight")
+		if blight_stage > 0:
+			return "Une lueur violette ronge les pierres de la ville..."
+		if quake_stage > 1:
+			return "Le sol tremble et lézarde les rues de la ville."
+		if quake_stage >= 1:
+			return "De légères secousses courent sous la ville."
+		if stages["storm"] > 0:
+			return "Un orage gronde au-dessus de la ville !"
+		if stages["wind"] > 1:
+			return "Le vent forcit et agite toute la ville."
+		if stages["rain"] >= 3:
+			return "Une pluie battante s'abat sur la ville."
+		if stages["rain"] >= 1:
+			return "Une pluie légère tombe sur la ville."
+		return "Bienvenue dans la petite ville — le village n'est plus qu'un souvenir."
+
 	if stages["storm"] > 0:
 		return "Un orage gronde au-dessus du village !"
 	if stages["flood"] > 0:
@@ -428,6 +526,8 @@ func evaluate_objective_condition(cond: Dictionary) -> bool:
 			return state.disasters[cond["disaster"]]["level"] >= cond["value"]
 		"disaster_unlocked":
 			return state.disasters[cond["disaster"]]["unlocked"]
+		"level_gte":
+			return state.level >= cond["value"]
 		_:
 			return false
 
