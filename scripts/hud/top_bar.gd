@@ -1,19 +1,22 @@
 class_name TopBar
 extends PanelContainer
-## Top bar HUD: current tier, chaos, chaos/s, available KO, plus reset and
-## sound-toggle buttons. Functional pass — default theme, no custom art
-## yet. Visual styling to match the original (wood/parchment/gold panels)
-## is a later, screenshot-driven pass; there is no way to see Godot's
-## rendered output from this environment.
+## Top bar HUD: current tier, chaos, chaos/s, available KO, plus buttons
+## for the Chaos Tree, the level-select menu, sound-toggle and reset.
+## Functional pass — default theme, no custom art yet. Visual styling to
+## match the original (wood/parchment/gold panels) is a later, screenshot-
+## driven pass; there is no way to see Godot's rendered output from this
+## environment.
 
 signal reset_requested
 signal open_tree_requested
+signal open_levels_requested
 
 var _label_tier: Label
 var _label_chaos: Label
 var _label_cps: Label
 var _label_ko: Label
 var _button_tree: Button
+var _button_levels: Button
 var _button_sound: Button
 
 func _ready() -> void:
@@ -31,6 +34,11 @@ func _ready() -> void:
 	_button_tree = Button.new()
 	_button_tree.pressed.connect(func(): open_tree_requested.emit())
 	row.add_child(_button_tree)
+
+	_button_levels = Button.new()
+	_button_levels.text = "🗺️ Niveaux"
+	_button_levels.pressed.connect(func(): open_levels_requested.emit())
+	row.add_child(_button_levels)
 
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL

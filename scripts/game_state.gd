@@ -75,7 +75,19 @@ func create_default_state() -> Dictionary:
 		"disasters": disasters,
 		"tree": tree,
 		"objectives": objectives,
-		"settings": {"sound_enabled": false},
+		# sfx_volume/music_volume/resolution_w/resolution_h are read once by
+		# GameSettings on startup (see its own header) and written back
+		# through it whenever the player moves a slider/picks a resolution
+		# in OptionsMenu — nothing here applies them, this dict only ever
+		# holds the persisted values. resolution_w/h of 0 means "no explicit
+		# choice made yet, leave the engine's own default window size alone".
+		"settings": {
+			"sound_enabled": false,
+			"sfx_volume": 1.0,
+			"music_volume": 1.0,
+			"resolution_w": 0,
+			"resolution_h": 0,
+		},
 		"last_save_time": Time.get_unix_time_from_system(),
 		# Which world level is currently active (see world_scene.gd's
 		# _build_level_1()/_build_level_2()) — 1 (village) until the
@@ -91,6 +103,26 @@ func create_default_state() -> Dictionary:
 		# collapsed" guarantee this project already makes for houses.
 		"level": 1,
 		"ruined_structures": {},
+		# `level` above is progression: it only ever advances (it's what
+		# get_dock_disaster_ids()/disaster unlocks/objectives read, so
+		# reaching level 2 keeps quake/blight available for good) and never
+		# decreases. `viewed_level` is a separate, purely-cosmetic concern —
+		# which WorldScene layout is actually on screen. It starts equal to
+		# `level` and auto-follows every advance (see
+		# notify_structure_ruined()), but LevelSelectMenu can also point it
+		# at any already-unlocked level on its own (view_level()), so
+		# revisiting an earlier level never touches progression-gated
+		# systems. get_current_tier_id()/get_scene_caption()/world_scene.gd's
+		# build() all read this one, never `level` directly.
+		"viewed_level": 1,
+		# Which levels the player may jump to from LevelSelectMenu, keyed by
+		# level id as a STRING — JSON object keys are always strings, and
+		# save_game()/load_game() round-trip through JSON, so using String
+		# keys from the start avoids an int/String mismatch after a save/
+		# reload (the same reason ruined_structures' own ids are always
+		# strings). Level 1 is always unlocked; every other id starts absent
+		# (== locked) until unlock_level() adds it.
+		"unlocked_levels": {"1": true},
 	}
 
 func load_game() -> void:
@@ -156,6 +188,14 @@ func load_game() -> void:
 	var saved_settings = saved.get("settings", {})
 	if saved_settings.has("sound_enabled"):
 		merged.settings.sound_enabled = bool(saved_settings.sound_enabled)
+	if saved_settings.has("sfx_volume"):
+		merged.settings.sfx_volume = float(saved_settings.sfx_volume)
+	if saved_settings.has("music_volume"):
+		merged.settings.music_volume = float(saved_settings.music_volume)
+	if saved_settings.has("resolution_w"):
+		merged.settings.resolution_w = int(saved_settings.resolution_w)
+	if saved_settings.has("resolution_h"):
+		merged.settings.resolution_h = int(saved_settings.resolution_h)
 
 	if saved.has("level"):
 		merged.level = int(saved.level)
@@ -165,14 +205,40 @@ func load_game() -> void:
 		for id in saved_ruined:
 			merged.ruined_structures[id] = true
 
+	# Defaults to the level actually reached (not fresh's hardcoded 1) so a
+	# save from before this field existed resumes looking at the same world
+	# it last showed, rather than snapping back to the village.
+	merged.viewed_level = merged.level
+	if saved.has("viewed_level"):
+		merged.viewed_level = int(saved.viewed_level)
+
+	merged.unlocked_levels = fresh.unlocked_levels.duplicate()
+	var saved_unlocked = saved.get("unlocked_levels", {})
+	if typeof(saved_unlocked) == TYPE_DICTIONARY:
+		for id in saved_unlocked:
+			if bool(saved_unlocked[id]):
+				merged.unlocked_levels[str(id)] = true
+	# A save from before unlocked_levels existed still has its own `level`
+	# reached — treat every level up to and including it as unlocked rather
+	# than sending a returning player who already destroyed the village
+	# back to a locked level 2.
+	for lvl in GameData.LEVELS:
+		if lvl["id"] <= merged.level:
+			merged.unlocked_levels[str(lvl["id"])] = true
+
 	state = merged
 
-func save_game() -> void:
+## Returns whether the write actually succeeded — read by PauseMenu's
+## "Quitter le jeu" so a failed save (disk full, permissions) is logged
+## rather than silently assumed to have worked right before closing.
+func save_game() -> bool:
 	state.last_save_time = Time.get_unix_time_from_system()
 	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
-	if f:
-		f.store_string(JSON.stringify(state))
-		f.close()
+	if not f:
+		return false
+	f.store_string(JSON.stringify(state))
+	f.close()
+	return true
 
 func do_reset() -> void:
 	if FileAccess.file_exists(SAVE_PATH):
@@ -272,12 +338,13 @@ func count_unlocked_disasters() -> int:
 ## disasters as a stand-in. That heuristic said nothing about *world
 ## layout* (which is what a tier/level actually changes now — see
 ## world_scene.gd's _build_level_1()/_build_level_2()), and could in
-## principle drift from it — level 2's own quake unlocks the instant
-## state.level reaches 2 in practice (see notify_structure_ruined()), but
-## nothing guaranteed that ordering in general. GameData.LEVEL_TIER_IDS is
-## the direct, single source of truth instead.
+## principle drift from it. GameData.LEVELS is the direct, single source of
+## truth instead — and this reads `viewed_level`, not `level`: the tier
+## name shown in the HUD should always match the world actually on screen,
+## including while the player is using LevelSelectMenu to look at an
+## earlier level than the one they've progressed to.
 func get_current_tier_id() -> String:
-	return GameData.LEVEL_TIER_IDS.get(state.level, "village")
+	return GameData.get_level_def(state.viewed_level).get("tier_id", "village")
 
 func get_current_tier_name() -> String:
 	var tier_id := get_current_tier_id()
@@ -305,6 +372,40 @@ func has_lightning_boost() -> bool:
 func is_structure_ruined(id: String) -> bool:
 	return state.ruined_structures.get(id, false)
 
+## Whether the player may select `id` from LevelSelectMenu right now.
+func is_level_unlocked(id: int) -> bool:
+	return state.unlocked_levels.get(str(id), false)
+
+## Marks `id` selectable from LevelSelectMenu from now on, permanently
+## (persisted immediately). Idempotent — safe to call on an already-
+## unlocked id. Deliberately never touches `viewed_level`: unlocking a
+## level and jumping the camera to it are two different actions (see
+## notify_structure_ruined(), which does both together on purpose, versus
+## a hypothetical future unlock path that shouldn't yank the player's view
+## away from where they are).
+func unlock_level(id: int) -> void:
+	if is_level_unlocked(id):
+		return
+	state.unlocked_levels[str(id)] = true
+	state_changed.emit()
+	save_game()
+
+## Points world_scene.gd's build() at a different already-unlocked level
+## without touching progression (`level`, disaster unlocks, objectives) —
+## the mechanism behind LevelSelectMenu letting the player revisit any
+## level they've already earned, including one they've since moved past.
+## Returns false (no-op) for a locked or nonexistent id.
+func view_level(id: int) -> bool:
+	if not is_level_unlocked(id):
+		return false
+	if state.viewed_level == id:
+		return true
+	state.viewed_level = id
+	level_changed.emit(state.viewed_level)
+	state_changed.emit()
+	save_game()
+	return true
+
 ## Called once by world_scene.gd the instant a structure's HouseSprite
 ## fires its own `ruined` signal for the first time. `level` is which
 ## level that structure belongs to and `total_structures` is how many
@@ -312,28 +413,33 @@ func is_structure_ruined(id: String) -> bool:
 ## count — see TOTAL_LEVEL_1_STRUCTURES/TOTAL_LEVEL_2_STRUCTURES there;
 ## deliberately not duplicated as a second source of truth here).
 ##
-## Auto-advances state.level to level+1 the moment every one of that
-## level's structures has been ruined at some point (not necessarily all
-## in the same session — ruined_structures accumulates permanently across
-## saves) — but only while `level` is still the CURRENT level and a next
-## one actually exists (GameData.MAX_IMPLEMENTED_LEVEL): level 2's own
-## structures already call this exactly the same way level 1's do (see
-## world_scene.gd), so the mechanism is exercised end-to-end today, but
-## fully ruining level 2 is inert until a level 3 layout ships and this
-## constant moves — not a half-built feature, a deliberately future one.
+## Auto-advances state.level to level+1 (and unlocks it, and points
+## viewed_level at it — see unlock_level()/view_level()'s own headers for
+## why those are usually two separate actions, joined here on purpose) the
+## moment every one of that level's structures has been ruined at some
+## point (not necessarily all in the same session — ruined_structures
+## accumulates permanently across saves) — but only while `level` is still
+## the CURRENT level and a next one actually exists
+## (GameData.max_implemented_level()): level 2's own structures already
+## call this exactly the same way level 1's do (see world_scene.gd), so the
+## mechanism is exercised end-to-end today, but fully ruining level 2 is
+## inert until a level 3 layout ships and gets marked implemented — not a
+## half-built feature, a deliberately future one.
 func notify_structure_ruined(id: String, level: int, total_structures: int) -> void:
 	if state.ruined_structures.get(id, false):
 		return
 	state.ruined_structures[id] = true
 
-	if state.level == level and level < GameData.MAX_IMPLEMENTED_LEVEL:
+	if state.level == level and level < GameData.max_implemented_level():
 		var ruined_here := 0
 		for ruined_id in state.ruined_structures:
 			if str(ruined_id).begins_with("l%d_" % level):
 				ruined_here += 1
 		if ruined_here >= total_structures:
 			state.level = level + 1
-			level_changed.emit(state.level)
+			state.viewed_level = state.level
+			state.unlocked_levels[str(state.level)] = true
+			level_changed.emit(state.viewed_level)
 			check_unlocks()
 
 	state_changed.emit()
@@ -364,11 +470,11 @@ func get_scene_stages() -> Dictionary:
 ## branch on top, read first so a town in the middle of a quake/blight
 ## isn't described as if it were still the calm village. "ville"
 ## replaces "village" throughout for the same reason get_current_tier_name
-## now says "Petite ville" once state.level reaches 2: the caption is the
+## now says "Petite ville" once viewed_level reaches 2: the caption is the
 ## other place a player reads the world's own name back.
 func get_scene_caption() -> String:
 	var stages := get_scene_stages()
-	if state.level >= 2:
+	if state.viewed_level >= 2:
 		var quake_stage := compute_stage("quake")
 		var blight_stage := compute_stage("blight")
 		if blight_stage > 0:

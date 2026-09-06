@@ -22,6 +22,8 @@ var _popover: DisasterPopover
 var _reset_modal: ResetModal
 var _offline_modal: OfflineModal
 var _chaos_tree: ChaosTreeOverlay
+var _level_select: LevelSelectMenu
+var _pause_menu: PauseMenu
 var _caption_label: Label
 var _open_dock_id: String = ""
 
@@ -46,6 +48,7 @@ func _ready() -> void:
 	_top_bar = TopBar.new()
 	_top_bar.reset_requested.connect(func(): _reset_modal.open())
 	_top_bar.open_tree_requested.connect(func(): _chaos_tree.open())
+	_top_bar.open_levels_requested.connect(func(): _level_select.open())
 	vbox.add_child(_top_bar)
 
 	var spacer := Control.new()
@@ -78,6 +81,12 @@ func _ready() -> void:
 	_chaos_tree = ChaosTreeOverlay.new()
 	add_child(_chaos_tree)
 
+	_level_select = LevelSelectMenu.new()
+	add_child(_level_select)
+
+	_pause_menu = PauseMenu.new()
+	add_child(_pause_menu)
+
 	GameState.offline_progress_applied.connect(_on_offline_progress)
 	# Offline gains disabled on request ("pour l'instant" — may come back
 	# later): just not calling apply_offline_progress() here. Everything
@@ -87,6 +96,26 @@ func _ready() -> void:
 
 func _process(_delta: float) -> void:
 	_caption_label.text = GameState.get_scene_caption()
+
+## Single Escape decision for the whole HUD, so PauseMenu opening doesn't
+## race ChaosTreeOverlay/LevelSelectMenu closing on the same keypress (see
+## chaos_tree_overlay.gd's own header for why that used to be two
+## independent listeners). Only ever runs while the tree is NOT already
+## paused — PauseMenu marks itself PROCESS_MODE_ALWAYS specifically so it
+## keeps listening for Escape on its own once paused, closing this
+## function's own else-branch out from ever needing to "un-pause" anything.
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_cancel"):
+		_handle_escape()
+		get_viewport().set_input_as_handled()
+
+func _handle_escape() -> void:
+	if _chaos_tree.visible:
+		_chaos_tree.close()
+	elif _level_select.visible:
+		_level_select.close()
+	else:
+		_pause_menu.open()
 
 func _on_disaster_selected(id: String) -> void:
 	if _open_dock_id == id:

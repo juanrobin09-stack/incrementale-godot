@@ -37,17 +37,46 @@ const TIERS := {
 # ever inferred from the highest unlocked disaster (see get_current_tier_id()
 # in game_state.gd, unchanged in spirit but now level-driven instead of a
 # disaster-unlock heuristic, since that heuristic has nothing to say about
-# *world layout*, only about the economy). LEVEL_TIER_IDS is the one place
-# that maps a level number to which TIERS entry names it in the HUD.
+# *world layout*, only about the economy).
 #
-# MAX_IMPLEMENTED_LEVEL gates GameState.notify_structure_ruined()'s
-# auto-advance: level 2's own destructible structures already report
-# themselves ruined the same way level 1's do (see world_scene.gd), so the
-# mechanism is exercised and ready, but nothing currently advances a fully
-# -ruined level 2 into a level 3 that doesn't exist yet. Bump this the same
-# day a level 3 layout actually ships, not before.
-const MAX_IMPLEMENTED_LEVEL := 2
-const LEVEL_TIER_IDS := {1: "village", 2: "small_town"}
+# Single source of truth for the level-select menu (level_select_menu.gd),
+# the tier name shown in the HUD, and how far GameState.notify_structure_
+# ruined() may auto-advance — replaces what used to be two separate consts
+# (MAX_IMPLEMENTED_LEVEL, LEVEL_TIER_IDS) that both encoded "which levels
+# actually exist" from two different angles and could in principle drift
+# apart. `implemented: false` entries are reserved slots only — no
+# WorldScene layout, no tier, always locked in the menu regardless of any
+# unlock condition (see GameState.is_level_unlocked()) — so the UI can list
+# levels 3-5 today without anything pretending they have real content.
+# Adding level 6+ later is one more entry here; nothing else about this
+# array's shape changes.
+const LEVELS := [
+	{"id": 1, "name": "Le village", "implemented": true, "tier_id": "village"},
+	{"id": 2, "name": "La petite ville", "implemented": true, "tier_id": "small_town"},
+	{"id": 3, "name": "Niveau 3", "implemented": false, "tier_id": ""},
+	{"id": 4, "name": "Niveau 4", "implemented": false, "tier_id": ""},
+	{"id": 5, "name": "Niveau 5", "implemented": false, "tier_id": ""},
+]
+
+func get_level_def(id: int) -> Dictionary:
+	for lvl in LEVELS:
+		if lvl["id"] == id:
+			return lvl
+	return {}
+
+## Highest level id with real content — gates GameState.notify_structure_
+## ruined()'s auto-advance: level 2's own destructible structures already
+## report themselves ruined the same way level 1's do (see world_scene.gd),
+## so the mechanism is exercised and ready, but nothing currently advances a
+## fully-ruined level 2 into a level 3 that doesn't exist yet. Marking a
+## future level 3 entry above as implemented=true the day its layout ships
+## is the only change this needs.
+func max_implemented_level() -> int:
+	var highest := 0
+	for lvl in LEVELS:
+		if lvl["implemented"]:
+			highest = max(highest, lvl["id"])
+	return highest
 
 # ---------------------------------------------------------------------------
 # Disasters
@@ -95,6 +124,10 @@ const DISASTERS := {
 		"base_cost": 1400, "cost_growth": 1.16,
 		"base_production": 18,
 		"max_visual_stage": 2, "levels_per_stage": 4,
+		# Excluded from the dock display on request (see get_dock_disaster_
+		# ids() below) even though it stays fully defined everywhere else —
+		# Chaos Tree branch, objective, scene captions all keep working.
+		"dock": false,
 	},
 
 	# ---- Petite ville (niveau 2) --------------------------------------
@@ -135,17 +168,6 @@ const DISASTERS := {
 	},
 }
 
-# The disaster dock (bottom-left panel, in the web version) intentionally
-# shows only these three, in this order — flood stays fully defined above
-# (Chaos Tree branch, objective, scene captions all keep working) but is
-# excluded from the dock display itself.
-const DOCK_DISASTER_IDS := ["rain", "wind", "storm"]
-# Level 2's own dock keeps every village disaster visible (their Chaos/s
-# never stops mattering just because the world moved on) and adds the two
-# new ones — nothing is ever removed from a dock once a level unlocks it,
-# only appended, matching how an incremental game's economy is meant to
-# keep compounding rather than reset per stage.
-const DOCK_DISASTER_IDS_LEVEL_2 := ["rain", "wind", "storm", "quake", "blight"]
 const DOCK_LOGOS := {
 	"rain": "res://assets/disasters/rain.png",
 	"wind": "res://assets/disasters/wind.png",
@@ -160,12 +182,27 @@ const DOCK_LOGOS := {
 	# needed.
 }
 
-## Dock roster for a given level — level 1 unchanged (DOCK_DISASTER_IDS
-## itself), level 2 the superset above. Centralised here rather than left
-## as an if/else in disaster_dock.gd so the *data* about what each level's
-## economy includes stays in this data layer, not the UI.
+## Dock roster for a given level: every disaster whose own tier unlocks at
+## or before that level's tier (TIERS[...]["order"]), except any explicitly
+## opted out via "dock": false on its own DISASTERS entry (only flood
+## today). Replaces two hand-maintained per-level id lists that could
+## silently drift from DISASTERS' own tier data — a disaster's tier is now
+## the only thing deciding when it gains a dock slot, appended
+## automatically (nothing is ever removed once earned), matching how an
+## incremental game's economy keeps compounding rather than resetting per
+## stage. A future level 3 disaster needs no change here, only its own
+## "tier" entry in DISASTERS.
 func get_dock_disaster_ids(level: int) -> Array:
-	return DOCK_DISASTER_IDS_LEVEL_2 if level >= 2 else DOCK_DISASTER_IDS
+	var tier_id: String = get_level_def(level).get("tier_id", "village")
+	var max_order: int = TIERS[tier_id]["order"]
+	var ids: Array = []
+	for id in DISASTERS:
+		var cfg: Dictionary = DISASTERS[id]
+		if not cfg.get("dock", true):
+			continue
+		if TIERS[cfg["tier"]]["order"] <= max_order:
+			ids.append(id)
+	return ids
 
 # ---------------------------------------------------------------------------
 # Synergies

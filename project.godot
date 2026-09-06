@@ -19,6 +19,7 @@ run/main_scene="res://scenes/main.tscn"
 
 GameData="*res://scripts/game_data.gd"
 GameState="*res://scripts/game_state.gd"
+GameSettings="*res://scripts/game_settings.gd"
 
 [rendering]
 

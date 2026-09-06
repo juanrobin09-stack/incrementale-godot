@@ -424,11 +424,14 @@ func close() -> void:
 	_selected_id = ""
 	_inspector_panel.visible = false
 
-func _input(event: InputEvent) -> void:
-	if not visible:
-		return
-	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		close()
+# Escape-to-close used to be handled here directly (raw KEY_ESCAPE via
+# _input()) — moved to main.gd now that PauseMenu also wants Escape: two
+# independent listeners on the same key could both fire on one keypress
+# while this overlay was open (this closing itself AND the pause menu
+# opening underneath it, depending on node processing order — never
+# something to rely on). main.gd now owns the single decision (close this
+# first if visible, else toggle pause) and calls close() directly, same
+# public method as always, just no longer the one deciding when to call it.
 
 # ---------------------------------------------------------------------------
 # Per-frame refresh
