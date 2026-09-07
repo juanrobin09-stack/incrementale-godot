@@ -67,6 +67,11 @@ func _ready() -> void:
 	_options_menu.back_requested.connect(_show_main)
 	center.add_child(_options_menu)
 
+	call_deferred("_debug_print_rect")
+
+func _debug_print_rect() -> void:
+	print("DEBUG PauseMenu after _ready: size=%s global_position=%s process_mode=%s" % [size, global_position, process_mode])
+
 func is_open() -> bool:
 	return visible
 

@@ -37,7 +37,10 @@ func _ready() -> void:
 
 	_button_levels = Button.new()
 	_button_levels.text = "Niveaux"
-	_button_levels.pressed.connect(func(): open_levels_requested.emit())
+	_button_levels.pressed.connect(func():
+		print("DEBUG Niveaux button pressed, size=%s global_position=%s" % [_button_levels.size, _button_levels.global_position])
+		open_levels_requested.emit()
+	)
 	row.add_child(_button_levels)
 
 	var spacer := Control.new()
@@ -54,6 +57,10 @@ func _ready() -> void:
 	row.add_child(button_reset)
 
 	_refresh()
+	call_deferred("_debug_print_levels_button_rect")
+
+func _debug_print_levels_button_rect() -> void:
+	print("DEBUG Niveaux button after layout: size=%s global_position=%s visible=%s disabled=%s text=%s" % [_button_levels.size, _button_levels.global_position, _button_levels.visible, _button_levels.disabled, _button_levels.text])
 
 func _make_stat_label(parent: Node) -> Label:
 	var l := Label.new()

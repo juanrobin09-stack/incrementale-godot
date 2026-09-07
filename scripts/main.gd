@@ -48,7 +48,11 @@ func _ready() -> void:
 	_top_bar = TopBar.new()
 	_top_bar.reset_requested.connect(func(): _reset_modal.open())
 	_top_bar.open_tree_requested.connect(func(): _chaos_tree.open())
-	_top_bar.open_levels_requested.connect(func(): _level_select.open())
+	_top_bar.open_levels_requested.connect(func():
+		print("DEBUG open_levels_requested received, calling _level_select.open()")
+		_level_select.open()
+		print("DEBUG after open(): visible=%s size=%s global_position=%s" % [_level_select.visible, _level_select.size, _level_select.global_position])
+	)
 	vbox.add_child(_top_bar)
 
 	var spacer := Control.new()
@@ -106,16 +110,20 @@ func _process(_delta: float) -> void:
 ## function's own else-branch out from ever needing to "un-pause" anything.
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("ui_cancel"):
+		print("DEBUG ui_cancel received in main.gd, tree.paused=%s" % get_tree().paused)
 		_handle_escape()
 		get_viewport().set_input_as_handled()
 
 func _handle_escape() -> void:
+	print("DEBUG _handle_escape: chaos_tree.visible=%s level_select.visible=%s" % [_chaos_tree.visible, _level_select.visible])
 	if _chaos_tree.visible:
 		_chaos_tree.close()
 	elif _level_select.visible:
 		_level_select.close()
 	else:
+		print("DEBUG calling _pause_menu.open()")
 		_pause_menu.open()
+		print("DEBUG after open(): visible=%s size=%s global_position=%s tree.paused=%s" % [_pause_menu.visible, _pause_menu.size, _pause_menu.global_position, get_tree().paused])
 
 func _on_disaster_selected(id: String) -> void:
 	if _open_dock_id == id:
