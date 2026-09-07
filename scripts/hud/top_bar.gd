@@ -36,7 +36,7 @@ func _ready() -> void:
 	row.add_child(_button_tree)
 
 	_button_levels = Button.new()
-	_button_levels.text = "🗺️ Niveaux"
+	_button_levels.text = "Niveaux"
 	_button_levels.pressed.connect(func(): open_levels_requested.emit())
 	row.add_child(_button_levels)
 
